@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e293b"/>
+    </linearGradient>
+  </defs>
+  <circle cx="50" cy="50" r="48" fill="url(#bg)" stroke="#57c5c8" stroke-width="2"/>
+  <circle cx="50" cy="50" r="20" fill="#f3c6e5" stroke="#ff48c4" stroke-width="3"/>
+  <circle cx="50" cy="15" r="8" fill="white" stroke="#00b7ff" stroke-width="2"/>
+  <circle cx="80" cy="35" r="8" fill="white" stroke="#ff007c" stroke-width="2"/>
+  <circle cx="80" cy="65" r="8" fill="white" stroke="#25ff00" stroke-width="2"/>
+  <circle cx="50" cy="85" r="8" fill="white" stroke="#ff8c00" stroke-width="2"/>
+  <circle cx="20" cy="65" r="8" fill="white" stroke="#ffd000" stroke-width="2"/>
+  <circle cx="20" cy="35" r="8" fill="white" stroke="#8b00ff" stroke-width="2"/>
+  <line x1="50" y1="50" x2="50" y2="15" stroke="#00b7ff" stroke-width="1.5" opacity="0.7"/>
+  <line x1="50" y1="50" x2="80" y2="35" stroke="#ff007c" stroke-width="1.5" opacity="0.7"/>
+  <line x1="50" y1="50" x2="80" y2="65" stroke="#25ff00" stroke-width="1.5" opacity="0.7"/>
+  <line x1="50" y1="50" x2="50" y2="85" stroke="#ff8c00" stroke-width="1.5" opacity="0.7"/>
+  <line x1="50" y1="50" x2="20" y2="65" stroke="#ffd000" stroke-width="1.5" opacity="0.7"/>
+  <line x1="50" y1="50" x2="20" y2="35" stroke="#8b00ff" stroke-width="1.5" opacity="0.7"/>
+</svg>
