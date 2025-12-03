@@ -1,4 +1,4 @@
-import { useState, useRef, ReactNode } from 'react';
+import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { FUNCTION_TYPES, FUNCTION_LABELS, FunctionType, LayoutTemplate, LineStyle } from '../types';
 import { exportToPNG, exportToSVG, exportToJSON, downloadFile, createShareableURL, exportToGIF } from '../utils/export';
@@ -255,6 +255,123 @@ function Toggle({ label, value, onChange, description }: ToggleProps) {
   );
 }
 
+// Color palette presets - curated colors for scientific figures
+const COLOR_PALETTE = [
+  // Row 1: Vibrant
+  '#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#264653',
+  // Row 2: Blues & Purples
+  '#1d3557', '#457b9d', '#a8dadc', '#6b5b95', '#b8a9c9',
+  // Row 3: Nature
+  '#606c38', '#283618', '#dda15e', '#bc6c25', '#344e41',
+  // Row 4: Modern
+  '#0077b6', '#00b4d8', '#90e0ef', '#ff6b6b', '#4ecdc4',
+  // Row 5: Neutrals
+  '#212529', '#495057', '#adb5bd', '#f8f9fa', '#ffffff',
+];
+
+interface ColorPickerProps {
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+}
+
+function ColorPicker({ value, onChange, label }: ColorPickerProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [customColor, setCustomColor] = useState(value);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close picker when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Update custom color when value changes externally
+  useEffect(() => {
+    setCustomColor(value);
+  }, [value]);
+
+  return (
+    <div className="relative" ref={pickerRef}>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-7 h-7 rounded cursor-pointer border-2 border-gray-600 hover:border-gray-400 transition-colors shadow-sm"
+          style={{ backgroundColor: value }}
+          title="Click to open color picker"
+        />
+        {label && <span className="text-xs text-gray-400">{label}</span>}
+      </div>
+
+      {isOpen && (
+        <div className="absolute z-50 top-9 left-0 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-56">
+          {/* Palette Grid */}
+          <div className="grid grid-cols-5 gap-1.5 mb-3">
+            {COLOR_PALETTE.map((color) => (
+              <button
+                key={color}
+                onClick={() => {
+                  onChange(color);
+                  setCustomColor(color);
+                }}
+                className={`w-8 h-8 rounded cursor-pointer transition-transform hover:scale-110 ${
+                  value.toLowerCase() === color.toLowerCase()
+                    ? 'ring-2 ring-accent-cyan ring-offset-1 ring-offset-gray-800'
+                    : 'border border-gray-600 hover:border-gray-400'
+                }`}
+                style={{ backgroundColor: color }}
+                title={color}
+              />
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="border-t border-gray-700 my-2" />
+
+          {/* Custom Color Input */}
+          <div className="space-y-2">
+            <span className="text-xs text-gray-400">Custom Color</span>
+            <div className="flex gap-2">
+              <input
+                type="color"
+                value={customColor}
+                onChange={(e) => {
+                  setCustomColor(e.target.value);
+                  onChange(e.target.value);
+                }}
+                className="w-10 h-8 rounded cursor-pointer border border-gray-600 bg-transparent"
+              />
+              <input
+                type="text"
+                value={customColor}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setCustomColor(val);
+                  if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                    onChange(val);
+                  }
+                }}
+                placeholder="#000000"
+                className="flex-1 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-gray-300 text-xs font-mono focus:outline-none focus:border-accent-cyan"
+              />
+            </div>
+          </div>
+
+          {/* Close hint */}
+          <p className="text-[10px] text-gray-600 mt-2 text-center">
+            Click outside to close
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ColorInputProps {
   label: string;
   value: string;
@@ -262,20 +379,7 @@ interface ColorInputProps {
 }
 
 function ColorInput({ label, value, onChange }: ColorInputProps) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="relative">
-        <input
-          type="color"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-7 h-7 rounded cursor-pointer border-2 border-gray-600 hover:border-gray-500 transition-colors"
-          style={{ backgroundColor: value }}
-        />
-      </div>
-      <span className="text-xs text-gray-400">{label}</span>
-    </div>
-  );
+  return <ColorPicker value={value} onChange={onChange} label={label} />;
 }
 
 interface LineStyleSelectProps {
@@ -959,29 +1063,17 @@ export function ControlPanel() {
 
                 {/* Color Pickers */}
                 <div className="flex gap-1.5">
-                  <input
-                    type="color"
+                  <ColorPicker
                     value={colors.functions[fn]}
-                    onChange={(e) => setFunctionColor(fn, e.target.value)}
-                    className="w-6 h-6 rounded cursor-pointer border border-gray-600"
-                    title="Outline Color"
-                    style={{ backgroundColor: colors.functions[fn] }}
+                    onChange={(v) => setFunctionColor(fn, v)}
                   />
-                  <input
-                    type="color"
+                  <ColorPicker
                     value={colors.functionBackground[fn]}
-                    onChange={(e) => setFunctionBackgroundColor(fn, e.target.value)}
-                    className="w-6 h-6 rounded cursor-pointer border border-gray-600"
-                    title="Fill Color"
-                    style={{ backgroundColor: colors.functionBackground[fn] }}
+                    onChange={(v) => setFunctionBackgroundColor(fn, v)}
                   />
-                  <input
-                    type="color"
+                  <ColorPicker
                     value={colors.functionText[fn]}
-                    onChange={(e) => setFunctionTextColor(fn, e.target.value)}
-                    className="w-6 h-6 rounded cursor-pointer border border-gray-600"
-                    title="Text Color"
-                    style={{ backgroundColor: colors.functionText[fn] }}
+                    onChange={(v) => setFunctionTextColor(fn, v)}
                   />
                 </div>
               </div>
