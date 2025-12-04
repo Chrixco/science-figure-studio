@@ -70,11 +70,12 @@ export function NetworkCanvas() {
         });
       });
 
-      // External connections
+      // External connections: each living circle connects to ALL other cells' function circles
       if (config.showExternalConnections) {
         cells.forEach((otherCell, otherIndex) => {
-          if (cellIndex >= otherIndex) return; // Avoid duplicates
+          if (cellIndex === otherIndex) return; // Skip same cell (internal connections handled above)
 
+          // Connect this cell's living circle to other cell's function circles
           otherCell.functions.forEach(fn => {
             if (!config.functionVisible[fn.type]) return;
             if (filter !== 'all' && fn.type !== filter) return;
