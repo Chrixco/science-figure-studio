@@ -151,12 +151,22 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
     }
   })),
 
-  setFunctionVisible: (fn, visible) => set((state) => ({
-    config: {
+  setFunctionVisible: (fn, visible) => set((state) => {
+    const newConfig = {
       ...state.config,
       functionVisible: { ...state.config.functionVisible, [fn]: visible }
-    }
-  })),
+    };
+
+    // Recalculate all cell geometry when visibility changes
+    const updatedCells = state.cells.map(cell =>
+      recalculateCellGeometry(cell, newConfig)
+    );
+
+    return {
+      config: newConfig,
+      cells: updatedCells
+    };
+  }),
 
   setFunctionWeight: (fn, weight) => set((state) => {
     const newConfig = {

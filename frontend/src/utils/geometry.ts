@@ -186,24 +186,47 @@ export function calculateCellBorderRadius(
 }
 
 // Generate function positions in a ring around the living center
+// visibleTypes: if provided, only positions for these types are calculated and evenly distributed
 export function generateFunctionPositions(
   center: Point,
   livingRadius: number,
   functionRadius: number,
-  functionWeights: Record<string, number>
+  functionWeights: Record<string, number>,
+  visibleTypes?: string[],
+  startAngle?: number
 ): Point[] {
   const positions: Point[] = [];
-  const count = FUNCTION_TYPES.length;
   const ringRadius = calculateFunctionRingRadius(livingRadius, functionRadius, functionWeights);
 
-  const startAngle = Math.random() * Math.PI * 2; // Random rotation
+  // Use provided start angle or generate random one
+  const angle0 = startAngle !== undefined ? startAngle : Math.random() * Math.PI * 2;
+
+  // If visibleTypes provided, only generate for those (evenly distributed)
+  // Otherwise generate for all FUNCTION_TYPES
+  const typesToPosition = visibleTypes || FUNCTION_TYPES;
+  const count = typesToPosition.length;
+
+  if (count === 0) {
+    // Return empty positions for all function types
+    return FUNCTION_TYPES.map(() => ({ x: center.x, y: center.y }));
+  }
+
+  // Create a map of type -> position for visible types
+  const typePositionMap = new Map<string, Point>();
 
   for (let i = 0; i < count; i++) {
-    const angle = startAngle + (i / count) * Math.PI * 2;
-    positions.push({
+    const angle = angle0 + (i / count) * Math.PI * 2;
+    typePositionMap.set(typesToPosition[i], {
       x: center.x + Math.cos(angle) * ringRadius,
       y: center.y + Math.sin(angle) * ringRadius
     });
+  }
+
+  // Return positions in FUNCTION_TYPES order
+  // Hidden functions get center position (they won't be rendered anyway)
+  for (const type of FUNCTION_TYPES) {
+    const pos = typePositionMap.get(type);
+    positions.push(pos || { x: center.x, y: center.y });
   }
 
   return positions;
@@ -550,8 +573,8 @@ export function updateCellPosition(cell: Cell, newPosition: Point): Cell {
   };
 }
 
-// Recalculate cell geometry (radius and function positions) based on current weights
-// Used when function weights change to update existing cells
+// Recalculate cell geometry (radius and function positions) based on current weights and visibility
+// Used when function weights or visibility changes to update existing cells
 export function recalculateCellGeometry(
   cell: Cell,
   config: NetworkConfig
@@ -563,12 +586,30 @@ export function recalculateCellGeometry(
     config.functionWeights
   );
 
-  // Recalculate function positions with new ring radius
+  // Get list of visible function types
+  const visibleTypes = FUNCTION_TYPES.filter(type => config.functionVisible[type]);
+
+  // Calculate the current start angle to maintain rotation consistency
+  // Find the first visible function and calculate its angle
+  let startAngle: number | undefined;
+  const firstVisible = cell.functions.find(fn => config.functionVisible[fn.type]);
+  if (firstVisible) {
+    const dx = firstVisible.position.x - cell.position.x;
+    const dy = firstVisible.position.y - cell.position.y;
+    const currentAngle = Math.atan2(dy, dx);
+    const visibleIndex = visibleTypes.indexOf(firstVisible.type);
+    // Calculate what the start angle should be based on current position
+    startAngle = currentAngle - (visibleIndex / visibleTypes.length) * Math.PI * 2;
+  }
+
+  // Recalculate function positions with new ring radius and visibility
   const newFunctionPositions = generateFunctionPositions(
     cell.position,
     cell.livingRadius,
     config.functionRadius * CANVAS_SCALE,
-    config.functionWeights
+    config.functionWeights,
+    visibleTypes,
+    startAngle
   );
 
   return {
