@@ -2,6 +2,13 @@
 node_modules/
 frontend/node_modules/
 
+# Python
+backend/venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
 # Build output
 dist/
 frontend/dist/
@@ -32,3 +39,6 @@ npm-debug.log*
 
 # Vite
 .vite/
+
+# Claude
+.claude/
