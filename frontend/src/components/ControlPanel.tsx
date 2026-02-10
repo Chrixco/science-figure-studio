@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { FUNCTION_TYPES, FUNCTION_LABELS, FunctionType, LayoutTemplate, LineStyle } from '../types';
 import { exportToPNG, exportToSVG, exportToJSON, downloadFile, createShareableURL, exportToGIF } from '../utils/export';
+import { downloadTemplate } from '../utils/excelTemplate';
 
 // ============================================================================
 // ICONS - Simple SVG icons for better visual communication
@@ -538,6 +539,7 @@ export function ControlPanel() {
     deletePreset,
     importFromJSON,
     importFromCSV,
+    importFromExcel,
     reset
   } = useNetworkStore();
 
@@ -548,6 +550,7 @@ export function ControlPanel() {
   const [showPresetInput, setShowPresetInput] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   // Event handlers
   const handlePlayAnimation = () => {
@@ -629,6 +632,34 @@ export function ControlPanel() {
       reader.readAsText(file);
     }
     if (csvInputRef.current) csvInputRef.current.value = '';
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        const result = await importFromExcel(file);
+        if (!result.success) {
+          alert('Import errors:\n' + result.errors.join('\n'));
+        } else if (result.errors.length > 0) {
+          // Success with warnings
+          alert('Imported with warnings:\n' + result.errors.join('\n'));
+        } else {
+          alert('Excel file imported successfully!');
+        }
+      } catch (error) {
+        alert('Failed to import Excel file: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      }
+    }
+    if (excelInputRef.current) excelInputRef.current.value = '';
+  };
+
+  const handleDownloadSimpleTemplate = () => {
+    downloadTemplate('simple');
+  };
+
+  const handleDownloadDetailedTemplate = () => {
+    downloadTemplate('detailed');
   };
 
   const templates: { value: LayoutTemplate; label: string; icon: ReactNode }[] = [
@@ -1166,6 +1197,7 @@ export function ControlPanel() {
       <CollapsibleSection title="Import" icon={Icons.upload}>
         <input ref={jsonInputRef} type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
         <input ref={csvInputRef} type="file" accept=".csv" onChange={handleImportCSV} className="hidden" />
+        <input ref={excelInputRef} type="file" accept=".xlsx" onChange={handleImportExcel} className="hidden" />
 
         <div className="space-y-2">
           <Button onClick={() => jsonInputRef.current?.click()} icon={Icons.upload} className="w-full justify-center">
@@ -1174,7 +1206,23 @@ export function ControlPanel() {
           <Button onClick={() => csvInputRef.current?.click()} icon={Icons.upload} className="w-full justify-center">
             Import CSV
           </Button>
-          <p className="text-[10px] text-gray-500 text-center">
+          <Button onClick={() => excelInputRef.current?.click()} icon={Icons.upload} className="w-full justify-center">
+            Import Excel (.xlsx)
+          </Button>
+
+          <div className="text-[10px] text-gray-500 mt-3 pt-2 border-t border-gray-700">
+            <p className="text-gray-400 font-medium mb-1">Download Templates:</p>
+            <div className="space-y-1">
+              <Button onClick={handleDownloadSimpleTemplate} variant="secondary" className="w-full justify-center text-xs py-1">
+                Simple Template
+              </Button>
+              <Button onClick={handleDownloadDetailedTemplate} variant="secondary" className="w-full justify-center text-xs py-1">
+                Detailed Template
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-gray-500 text-center mt-2">
             CSV format: x, y columns (0-1 range), optional label
           </p>
         </div>

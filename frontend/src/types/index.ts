@@ -286,3 +286,12 @@ export const FUNCTION_LABELS: Record<FunctionType, string> = {
   biodiversity: 'Biodiversity',
   pollution: 'Pollution'
 };
+
+// Excel import row interface
+export interface ExcelRow {
+  x: number;
+  y: number;
+  label: string;
+  // Optional function visibility columns (e.g., water_visible, education_visible)
+  [key: string]: number | string | boolean | undefined;
+}

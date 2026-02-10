@@ -76,6 +76,7 @@ interface NetworkStore {
   loadState: (cells: Cell[], config: NetworkConfig, colors: ColorScheme) => void;
   importFromJSON: (json: string) => boolean;
   importFromCSV: (csv: string) => boolean;
+  importFromExcel: (file: File) => Promise<{ success: boolean; errors: string[] }>;
   reset: () => void;
 }
 
@@ -521,6 +522,32 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
       return false;
     } catch {
       return false;
+    }
+  },
+
+  importFromExcel: async (file) => {
+    try {
+      const { parseExcelFile } = await import('../utils/excelImport');
+      const state = get();
+      const result = await parseExcelFile(file, state.config);
+
+      if (result.errors.length > 0 && result.cells.length === 0) {
+        return { success: false, errors: result.errors };
+      }
+
+      // Save to history before making changes
+      get().saveToHistory();
+
+      // Update cells
+      set({
+        cells: result.cells,
+        config: { ...state.config, cellCount: result.cells.length }
+      });
+
+      return { success: true, errors: result.errors };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return { success: false, errors: [`Failed to import Excel file: ${message}`] };
     }
   },
 
