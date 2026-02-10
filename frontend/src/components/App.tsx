@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { NetworkCanvas } from './NetworkCanvas';
+import { NetworkCanvas3D } from './NetworkCanvas3D';
 import { ControlPanel } from './ControlPanel';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { parseShareableURL } from '../utils/export';
 
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { loadState } = useNetworkStore();
+  const { loadState, renderMode, cells, config, colors } = useNetworkStore();
 
   // Load from URL on mount
   useEffect(() => {
@@ -61,7 +62,11 @@ export function App() {
 
       {/* Main Canvas Area */}
       <main className="flex-1 h-full">
-        <NetworkCanvas />
+        {renderMode === '3d' ? (
+          <NetworkCanvas3D cells={cells} config={config} colors={colors} />
+        ) : (
+          <NetworkCanvas />
+        )}
       </main>
     </div>
   );

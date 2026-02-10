@@ -518,6 +518,7 @@ export function ControlPanel() {
     presets,
     canUndo,
     canRedo,
+    renderMode,
     setConfig,
     setColors,
     setFunctionColor,
@@ -532,6 +533,7 @@ export function ControlPanel() {
     randomizeColors,
     updateCellCount,
     toggleTheme,
+    setRenderMode,
     undo,
     redo,
     savePreset,
@@ -1145,6 +1147,38 @@ export function ControlPanel() {
 
   const renderExportTab = () => (
     <div className="space-y-3">
+      {/* Render Mode Toggle */}
+      <div className="bg-gray-800/50 rounded-lg p-3 space-y-2">
+        <div className="text-xs font-medium text-gray-400 mb-2">Render Mode</div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setRenderMode('2d')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+              renderMode === '2d'
+                ? 'bg-accent-cyan text-gray-900'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            2D View
+          </button>
+          <button
+            onClick={() => setRenderMode('3d')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${
+              renderMode === '3d'
+                ? 'bg-accent-cyan text-gray-900'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            3D View
+          </button>
+        </div>
+        {renderMode === '3d' && (
+          <div className="text-[10px] text-gray-400 bg-gray-900 rounded p-2 mt-2">
+            <div>Drag: Rotate • Wheel: Zoom • R: Reset</div>
+          </div>
+        )}
+      </div>
+
       {/* Export Formats */}
       <CollapsibleSection title="Export Image" icon={Icons.download} defaultOpen>
         <div className="grid grid-cols-2 gap-2">

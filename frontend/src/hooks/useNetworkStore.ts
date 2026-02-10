@@ -28,6 +28,9 @@ interface NetworkStore {
   isDragging: boolean;
   presets: Preset[];
 
+  // 3D Mode
+  renderMode: '2d' | '3d';
+
   // Undo/Redo
   history: HistoryEntry[];
   historyIndex: number;
@@ -60,6 +63,9 @@ interface NetworkStore {
 
   // Theme
   toggleTheme: () => void;
+
+  // Rendering
+  setRenderMode: (mode: '2d' | '3d') => void;
 
   // Undo/Redo
   undo: () => void;
@@ -109,6 +115,7 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
   selectedCellIds: [],
   isDragging: false,
   presets: loadPresetsFromLocalStorage(),
+  renderMode: '2d',
   history: [],
   historyIndex: -1,
   canUndo: false,
@@ -343,6 +350,8 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
       colors: newColors
     };
   }),
+
+  setRenderMode: (mode) => set({ renderMode: mode }),
 
   saveToHistory: () => set((state) => {
     const entry: HistoryEntry = {
