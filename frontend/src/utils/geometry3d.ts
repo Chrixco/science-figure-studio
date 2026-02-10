@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Cell, ColorScheme } from '../types';
+import { Collision } from './collision3d';
 
 /**
  * 3D Scene Management
@@ -12,8 +13,10 @@ export interface Scene3D {
   camera: THREE.PerspectiveCamera;
   cellGroup: THREE.Group;
   connectionGroup: THREE.Group;
+  collisionGroup: THREE.Group;
   materialCache: Map<string, THREE.Material>;
   geometryCache: Map<string, THREE.BufferGeometry>;
+  cellMeshMap: Map<string, THREE.Mesh>; // Cell ID → living circle mesh
 }
 
 /**
@@ -81,6 +84,12 @@ export function create3DScene(
   connectionGroup.name = 'connections';
   scene.add(connectionGroup);
 
+  const collisionGroup = new THREE.Group();
+  collisionGroup.name = 'collisions';
+  scene.add(collisionGroup);
+
+  const cellMeshMap = new Map<string, THREE.Mesh>();
+
   // Add cells to scene
   for (const cell of cells) {
     addCell3D(
@@ -88,7 +97,8 @@ export function create3DScene(
       cell,
       colors,
       materialCache,
-      geometryCache
+      geometryCache,
+      cellMeshMap
     );
   }
 
@@ -101,8 +111,10 @@ export function create3DScene(
     camera,
     cellGroup,
     connectionGroup,
+    collisionGroup,
     materialCache,
-    geometryCache
+    geometryCache,
+    cellMeshMap
   };
 }
 
@@ -114,7 +126,8 @@ function addCell3D(
   cell: Cell,
   colors: ColorScheme,
   materialCache: Map<string, THREE.Material>,
-  geometryCache: Map<string, THREE.BufferGeometry>
+  geometryCache: Map<string, THREE.BufferGeometry>,
+  cellMeshMap?: Map<string, THREE.Mesh>
 ): void {
   // Create cell group and position it
   const cellGroup = new THREE.Group();
@@ -130,7 +143,13 @@ function addCell3D(
   livingMesh.castShadow = true;
   livingMesh.receiveShadow = true;
   livingMesh.name = 'living';
+  livingMesh.userData.cellId = cell.id;
   cellGroup.add(livingMesh);
+
+  // Store mesh reference for collision visualization
+  if (cellMeshMap) {
+    cellMeshMap.set(cell.id, livingMesh);
+  }
 
   // Function circles (orbiting)
   for (const fn of cell.functions) {
@@ -273,6 +292,7 @@ export function updateScene3D(
   // Clear existing geometry
   scene3D.cellGroup.clear();
   scene3D.connectionGroup.clear();
+  scene3D.cellMeshMap.clear();
 
   // Rebuild scene
   for (const cell of cells) {
@@ -281,7 +301,8 @@ export function updateScene3D(
       cell,
       colors,
       scene3D.materialCache,
-      scene3D.geometryCache
+      scene3D.geometryCache,
+      scene3D.cellMeshMap
     );
   }
 
@@ -341,6 +362,55 @@ export function dispose3D(scene3D: Scene3D): void {
   // Dispose of renderer
   scene3D.renderer.dispose();
   scene3D.renderer.domElement.remove();
+}
+
+/**
+ * Visualize collisions by marking overlapping cells
+ */
+export function visualizeCollisions(
+  scene3D: Scene3D,
+  collisions: Collision[],
+  colors: ColorScheme
+): void {
+  // Clear collision group
+  scene3D.collisionGroup.clear();
+
+  // Build set of overlapping cell IDs
+  const overlappingCellIds = new Set<string>();
+  collisions.forEach(c => {
+    overlappingCellIds.add(c.cell1Id);
+    overlappingCellIds.add(c.cell2Id);
+  });
+
+  // Update living mesh colors
+  for (const [cellId, mesh] of scene3D.cellMeshMap.entries()) {
+    if (overlappingCellIds.has(cellId)) {
+      // Overlapping: mark as red with glow
+      const material = mesh.material as THREE.MeshPhongMaterial;
+      material.color.setHex(0xff4444); // Red
+      material.emissive.setHex(0xff6666); // Glow
+      material.emissiveIntensity = 0.8;
+    } else {
+      // Not overlapping: restore original color
+      const material = mesh.material as THREE.MeshPhongMaterial;
+      material.color.copy(new THREE.Color(colors.living));
+      material.emissive.setHex(0x000000); // No glow
+      material.emissiveIntensity = 0;
+    }
+  }
+}
+
+/**
+ * Clear collision visualization
+ */
+export function clearCollisionVisualization(scene3D: Scene3D, colors: ColorScheme): void {
+  for (const mesh of scene3D.cellMeshMap.values()) {
+    const material = mesh.material as THREE.MeshPhongMaterial;
+    material.color.copy(new THREE.Color(colors.living));
+    material.emissive.setHex(0x000000);
+    material.emissiveIntensity = 0;
+  }
+  scene3D.collisionGroup.clear();
 }
 
 /**

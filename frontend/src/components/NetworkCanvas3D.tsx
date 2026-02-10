@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Cell, ColorScheme, NetworkConfig } from '../types';
 import {
@@ -8,8 +8,11 @@ import {
   render3D,
   dispose3D,
   resetCamera3D,
+  visualizeCollisions,
+  clearCollisionVisualization,
   Scene3D
 } from '../utils/geometry3d';
+import { detectCollisions, getCollisionStats, Collision, CollisionStats } from '../utils/collision3d';
 
 interface NetworkCanvas3DProps {
   cells: Cell[];
@@ -26,6 +29,10 @@ export function NetworkCanvas3D({
   const scene3DRef = useRef<Scene3D | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number | null>(null);
+
+  // Collision detection state
+  const [collisions, setCollisions] = useState<Collision[]>([]);
+  const [collisionStats, setCollisionStats] = useState<CollisionStats | null>(null);
 
   // Initialize 3D scene on mount
   useEffect(() => {
@@ -114,6 +121,22 @@ export function NetworkCanvas3D({
     if (!scene3DRef.current) return;
 
     updateScene3D(scene3DRef.current, cells, colors);
+
+    // Detect collisions
+    const detectedCollisions = detectCollisions(cells);
+    setCollisions(detectedCollisions);
+
+    // Calculate statistics
+    const stats = getCollisionStats(cells, detectedCollisions);
+    setCollisionStats(stats);
+
+    // Visualize collisions
+    if (detectedCollisions.length > 0) {
+      visualizeCollisions(scene3DRef.current, detectedCollisions, colors);
+    } else {
+      clearCollisionVisualization(scene3DRef.current, colors);
+    }
+
     render3D(scene3DRef.current);
   }, [cells, colors]);
 
@@ -151,7 +174,8 @@ export function NetworkCanvas3D({
           zIndex: 10,
           pointerEvents: 'none',
           textAlign: 'right',
-          lineHeight: '1.5'
+          lineHeight: '1.5',
+          maxWidth: '280px'
         }}
       >
         <div>Drag: Rotate</div>
@@ -159,6 +183,37 @@ export function NetworkCanvas3D({
         <div style={{ marginTop: '5px', borderTop: '1px solid rgba(255,255,255,0.3)', paddingTop: '5px' }}>
           R: Reset Camera
         </div>
+
+        {/* Collision Statistics */}
+        {collisionStats && (
+          <div
+            style={{
+              marginTop: '10px',
+              paddingTop: '10px',
+              borderTop: '1px solid rgba(255,255,255,0.3)',
+              color: collisionStats.severity === 'none' ? '#90ee90' : '#ff6666'
+            }}
+          >
+            <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>
+              Collisions: {collisionStats.collisionCount}
+            </div>
+            {collisionStats.collisionCount > 0 && (
+              <>
+                <div>Severity: {collisionStats.severity.toUpperCase()}</div>
+                <div>Overlapping: {collisionStats.overlappingCellCount} cells</div>
+                {collisions.length > 0 && collisions.length <= 3 && (
+                  <div style={{ marginTop: '5px', fontSize: '11px', color: '#ffcc99' }}>
+                    {collisions.map(c => (
+                      <div key={c.id}>
+                        {c.cell1Label} ↔ {c.cell2Label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
