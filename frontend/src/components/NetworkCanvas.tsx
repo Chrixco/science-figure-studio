@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
-import { useCameraStore } from '../hooks/useCameraStore';
+import { useViewState } from '../hooks/useViewState';
 import { calculateSmartLineSegments, calculateBoundingBox, CANVAS_SCALE } from '../utils/geometry';
 import { Cell, Point, FunctionType, LineStyle } from '../types';
 
@@ -36,7 +36,7 @@ export function NetworkCanvas() {
     setIsDragging, moveCell, moveSelectedCells, saveToHistory,
     undo, redo
   } = useNetworkStore();
-  const { zoom, panX, panY, pan, zoomByFactor, setZoom, moveTo } = useCameraStore();
+  const { zoom, panX, panY, setZoom, zoomIn, zoomOut, pan, setView } = useViewState();
 
   const [isPanning, setIsPanning] = useState(false);
   const [canvasSize, setCanvasSize] = useState(0);
@@ -184,8 +184,8 @@ export function NetworkCanvas() {
     const newPanX = centerX - networkCenterX * newZoom;
     const newPanY = centerY - networkCenterY * newZoom;
 
-    moveTo(newPanX, newPanY, newZoom);
-  }, [cells, moveTo]);
+    setView(newZoom, newPanX, newPanY);
+  }, [cells, setView]);
 
   // Auto-fit on initial load
   useEffect(() => {
@@ -264,7 +264,7 @@ export function NetworkCanvas() {
     const delta = isPinch ? -e.deltaY * 0.01 : -e.deltaY * 0.002;
     const newZoom = Math.max(0.05, Math.min(10, zoom * (1 + delta)));
     setZoom(newZoom);
-  }, [zoom, setZoom, zoomByFactor]);
+  }, [zoom, setZoom]);
 
   // Double-click to zoom to cell
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -289,9 +289,9 @@ export function NetworkCanvas() {
       const newPanX = centerX - cellNormalizedX * newZoom;
       const newPanY = centerY - cellNormalizedY * newZoom;
 
-      moveTo(newPanX, newPanY, newZoom);
+      setView(newZoom, newPanX, newPanY);
     }
-  }, [screenToNetwork, findCellAtPosition, moveTo]);
+  }, [screenToNetwork, findCellAtPosition, setView]);
 
   // Pointer handlers
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -334,7 +334,7 @@ export function NetworkCanvas() {
     if (isPanning && panStartRef.current) {
       const dx = e.clientX - panStartRef.current.x;
       const dy = e.clientY - panStartRef.current.y;
-      pan(dx * 0.01, dy * 0.01);
+      pan(dx, dy);
       panStartRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -635,10 +635,10 @@ export function NetworkCanvas() {
 
       if (e.key === '+' || e.key === '=') {
         e.preventDefault();
-        zoomByFactor(1.25);
+        zoomIn();
       } else if (e.key === '-') {
         e.preventDefault();
-        zoomByFactor(0.8);
+        zoomOut();
       } else if (e.key === '0') {
         e.preventDefault();
         fitAll();
@@ -655,7 +655,7 @@ export function NetworkCanvas() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [zoomByFactor, fitAll, setSelectedCells, undo, redo, moveTo]);
+  }, [zoomIn, zoomOut, fitAll, setSelectedCells, undo, redo]);
 
   // Listen for playAnimation events from ControlPanel
   useEffect(() => {
@@ -672,14 +672,14 @@ export function NetworkCanvas() {
       {/* Zoom/Pan Controls */}
       <div className="absolute top-6 right-6 flex flex-col gap-2 z-10">
         <button
-          onClick={() => zoomByFactor(1.25)}
+          onClick={zoomIn}
           className="w-10 h-10 bg-canvas-dark/80 hover:bg-canvas-light text-white rounded-lg flex items-center justify-center text-xl font-bold transition-colors backdrop-blur-sm"
           title="Zoom In (+)"
         >
           +
         </button>
         <button
-          onClick={() => zoomByFactor(0.8)}
+          onClick={zoomOut}
           className="w-10 h-10 bg-canvas-dark/80 hover:bg-canvas-light text-white rounded-lg flex items-center justify-center text-xl font-bold transition-colors backdrop-blur-sm"
           title="Zoom Out (-)"
         >
@@ -695,7 +695,7 @@ export function NetworkCanvas() {
           </svg>
         </button>
         <button
-          onClick={() => moveTo(0, 0, 1)}
+          onClick={() => setView(1, 0, 0)}
           className="w-10 h-10 bg-canvas-dark/80 hover:bg-canvas-light text-white rounded-lg flex items-center justify-center transition-colors backdrop-blur-sm"
           title="Reset View"
         >
