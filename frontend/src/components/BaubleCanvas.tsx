@@ -740,6 +740,7 @@ export function BaubleCanvas() {
     // Scroll wheel always zooms (mouse wheel, trackpad pinch, Ctrl+scroll)
     // Negative deltaY = scroll up = zoom in (1.1x), Positive = scroll down = zoom out (0.9x)
     const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    console.log('📊 BaubleCanvas (Graph): Zoom', { factor, deltaY: e.deltaY });
     zoomByFactor(factor);
   };
 

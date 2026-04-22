@@ -321,6 +321,7 @@ export function CellularCanvas() {
       if (e.button === 1 || (e.button === 0 && interactionMode === 'pan')) {
         isMiddleMouseRef.current = true;
         panStartRef.current = { x: e.clientX, y: e.clientY };
+        console.log('🌐 Cellular: Pan started', { button: e.button, interactionMode });
         return;
       }
 
@@ -347,6 +348,7 @@ export function CellularCanvas() {
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const factor = e.deltaY > 0 ? 0.95 : 1.05;
+      console.log('🌐 Cellular: Zoom', { factor, deltaY: e.deltaY });
       zoomByFactor(factor);
     };
 
