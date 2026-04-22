@@ -43,6 +43,7 @@ export function NetworkCanvas() {
   const [isAnimating, setIsAnimating] = useState(false);
   const [animationProgress, setAnimationProgress] = useState(1); // 0-1, 1 = fully drawn
   const [showConnections, setShowConnections] = useState(true);
+  const [interactionMode, setInteractionMode] = useState<'pan' | 'select'>('pan'); // Pan or selection mode
 
   const dragStartRef = useRef<Point | null>(null);
   const dragCellStartRef = useRef<Point | null>(null);
@@ -163,20 +164,25 @@ export function NetworkCanvas() {
     const canvas = canvasRef.current;
     if (!canvas || cells.length === 0) return;
 
-    const bbox = calculateBoundingBox(cells);
-    const canvasPixels = canvas.width;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
 
-    const scaleX = canvasPixels / (bbox.width * (canvasPixels / CANVAS_SCALE));
-    const scaleY = canvasPixels / (bbox.height * (canvasPixels / CANVAS_SCALE));
+    const bbox = calculateBoundingBox(cells);
+
+    // Calculate zoom to fit bounding box
+    const scaleX = width / (bbox.width * (width / CANVAS_SCALE));
+    const scaleY = height / (bbox.height * (height / CANVAS_SCALE));
     const newZoom = Math.min(scaleX, scaleY) * 0.9;
 
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const networkCenterX = bbox.centerX * (canvas.width / CANVAS_SCALE);
-    const networkCenterY = bbox.centerY * (canvas.height / CANVAS_SCALE);
+    // Calculate pan to center the bounding box
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const networkCenterX = (bbox.centerX - CANVAS_SCALE / 2) * width / CANVAS_SCALE;
+    const networkCenterY = (bbox.centerY - CANVAS_SCALE / 2) * height / CANVAS_SCALE;
 
-    const newPanX = (centerX - networkCenterX) * newZoom;
-    const newPanY = (centerY - networkCenterY) * newZoom;
+    const newPanX = centerX - networkCenterX * newZoom;
+    const newPanY = centerY - networkCenterY * newZoom;
 
     setView(newZoom, newPanX, newPanY);
   }, [cells, setView]);
@@ -195,30 +201,47 @@ export function NetworkCanvas() {
     if (!canvas) return { x: 0, y: 0 };
 
     const rect = canvas.getBoundingClientRect();
-    const canvasX = (screenX - rect.left) * (canvas.width / rect.width);
-    const canvasY = (screenY - rect.top) * (canvas.height / rect.height);
 
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+    // Get visual dimensions (CSS pixels)
+    const width = rect.width;
+    const height = rect.height;
 
-    const networkX = ((canvasX - centerX - panX) / zoom + centerX) / canvas.width * CANVAS_SCALE;
-    const networkY = ((canvasY - centerY - panY) / zoom + centerY) / canvas.height * CANVAS_SCALE;
+    // Convert screen position to canvas position in visual pixels
+    const canvasX = screenX - rect.left;
+    const canvasY = screenY - rect.top;
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Normalize to center and apply inverse zoom/pan
+    const normalizedX = (canvasX - centerX - panX) / zoom;
+    const normalizedY = (canvasY - centerY - panY) / zoom;
+
+    // Scale to network coordinates (0-CANVAS_SCALE)
+    const networkX = normalizedX / width * CANVAS_SCALE + CANVAS_SCALE / 2;
+    const networkY = normalizedY / height * CANVAS_SCALE + CANVAS_SCALE / 2;
 
     return { x: networkX, y: networkY };
   }, [zoom, panX, panY]);
 
   // Convert network coords to canvas coords
   const networkToCanvas = useCallback((point: Point, canvas: HTMLCanvasElement): Point => {
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
 
-    const pixelX = point.x / CANVAS_SCALE * canvas.width;
-    const pixelY = point.y / CANVAS_SCALE * canvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-    return {
-      x: (pixelX - centerX) * zoom + centerX + panX,
-      y: (pixelY - centerY) * zoom + centerY + panY
-    };
+    // Convert from network space (0-CANVAS_SCALE) to centered normalized space
+    const normalizedX = (point.x - CANVAS_SCALE / 2) * width / CANVAS_SCALE;
+    const normalizedY = (point.y - CANVAS_SCALE / 2) * height / CANVAS_SCALE;
+
+    // Apply zoom and pan
+    const canvasX = normalizedX * zoom + centerX + panX;
+    const canvasY = normalizedY * zoom + centerY + panY;
+
+    return { x: canvasX, y: canvasY };
   }, [zoom, panX, panY]);
 
   // Find cell at position
@@ -253,14 +276,18 @@ export function NetworkCanvas() {
 
     if (cell) {
       // Zoom to this cell
-      const centerX = canvas.width / 2;
-      const centerY = canvas.height / 2;
-      const cellX = cell.position.x / CANVAS_SCALE * canvas.width;
-      const cellY = cell.position.y / CANVAS_SCALE * canvas.height;
+      const rect = canvas.getBoundingClientRect();
+      const width = rect.width;
+      const height = rect.height;
+
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const cellNormalizedX = (cell.position.x - CANVAS_SCALE / 2) * width / CANVAS_SCALE;
+      const cellNormalizedY = (cell.position.y - CANVAS_SCALE / 2) * height / CANVAS_SCALE;
 
       const newZoom = 2.5;
-      const newPanX = (centerX - cellX) * newZoom;
-      const newPanY = (centerY - cellY) * newZoom;
+      const newPanX = centerX - cellNormalizedX * newZoom;
+      const newPanY = centerY - cellNormalizedY * newZoom;
 
       setView(newZoom, newPanX, newPanY);
     }
@@ -576,13 +603,14 @@ export function NetworkCanvas() {
       const container = containerRef.current;
       if (!canvas || !container) return;
 
-      const size = Math.min(container.clientWidth, container.clientHeight);
-      canvas.width = size * window.devicePixelRatio;
-      canvas.height = size * window.devicePixelRatio;
-      canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+      canvas.width = width * window.devicePixelRatio;
+      canvas.height = height * window.devicePixelRatio;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
 
-      setCanvasSize(size);
+      setCanvasSize(Math.max(width, height));
       draw();
     };
 
@@ -680,6 +708,33 @@ export function NetworkCanvas() {
         {/* Divider */}
         <div className="w-full h-px bg-gray-600 my-1" />
 
+        {/* Interaction Mode Controls */}
+        <button
+          onClick={() => setInteractionMode('pan')}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all ${
+            interactionMode === 'pan'
+              ? 'bg-accent-cyan text-gray-900'
+              : 'bg-canvas-dark/80 hover:bg-canvas-light text-white'
+          } backdrop-blur-sm`}
+          title="Pan Mode - Click and drag to move view"
+        >
+          🖐️
+        </button>
+        <button
+          onClick={() => setInteractionMode('select')}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all ${
+            interactionMode === 'select'
+              ? 'bg-accent-cyan text-gray-900'
+              : 'bg-canvas-dark/80 hover:bg-canvas-light text-white'
+          } backdrop-blur-sm`}
+          title="Selection Mode - Click and drag to select"
+        >
+          ⬜
+        </button>
+
+        {/* Divider */}
+        <div className="w-full h-px bg-gray-600 my-1" />
+
         {/* Animation button */}
         <button
           onClick={isAnimating ? stopAnimation : startAnimation}
@@ -735,6 +790,7 @@ export function NetworkCanvas() {
 
       <canvas
         ref={canvasRef}
+        data-network-canvas="true"
         className={`rounded-lg shadow-2xl ${isPanning ? 'cursor-grabbing' : 'cursor-grab'}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
