@@ -317,10 +317,15 @@ export function CellularCanvas() {
     if (!containerRef.current || !cameraRef.current) return;
 
     const handleMouseDown = (e: MouseEvent) => {
-      if (e.button === 1) {
+      // Middle mouse button or left click in pan mode = pan
+      if (e.button === 1 || (e.button === 0 && interactionMode === 'pan')) {
         isMiddleMouseRef.current = true;
         panStartRef.current = { x: e.clientX, y: e.clientY };
-      } else if (interactionMode === 'select' && e.button === 0) {
+        return;
+      }
+
+      // Only left click in select mode for node selection
+      if (interactionMode === 'select' && e.button === 0) {
         setSelectedNodeId(null);
       }
     };
