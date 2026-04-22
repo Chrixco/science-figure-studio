@@ -41,6 +41,7 @@ export function CellularCanvas() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
   const isMiddleMouseRef = useRef(false);
+  const dimensionsRef = useRef({ width: 0, height: 0 });
 
   // Create canvas texture with text
   const createTextTexture = (text: string, color: string, fontSize: number, fontFamily: string = 'Arial'): { texture: THREE.CanvasTexture; width: number; height: number } => {
@@ -115,6 +116,7 @@ export function CellularCanvas() {
 
     const width = containerRef.current.clientWidth;
     const height = containerRef.current.clientHeight;
+    dimensionsRef.current = { width, height };
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x1a1a1a);
@@ -145,6 +147,7 @@ export function CellularCanvas() {
     const handleResize = () => {
       const newWidth = containerRef.current?.clientWidth || width;
       const newHeight = containerRef.current?.clientHeight || height;
+      dimensionsRef.current = { width: newWidth, height: newHeight };
       camera.left = -newWidth / (WORLD_SCALE * 2);
       camera.right = newWidth / (WORLD_SCALE * 2);
       camera.top = newHeight / (WORLD_SCALE * 2);
@@ -159,13 +162,14 @@ export function CellularCanvas() {
     const animate = () => {
       requestAnimationFrame(animate);
 
-      camera.position.x = -panX * (width / (WORLD_SCALE * 2));
-      camera.position.y = panY * (height / (WORLD_SCALE * 2));
+      const { width: currentWidth, height: currentHeight } = dimensionsRef.current;
+      camera.position.x = -panX * (currentWidth / (WORLD_SCALE * 2));
+      camera.position.y = panY * (currentHeight / (WORLD_SCALE * 2));
       const zoomScale = 1 / zoom;
-      camera.left = (-width / (WORLD_SCALE * 2)) * zoomScale;
-      camera.right = (width / (WORLD_SCALE * 2)) * zoomScale;
-      camera.top = (height / (WORLD_SCALE * 2)) * zoomScale;
-      camera.bottom = (-height / (WORLD_SCALE * 2)) * zoomScale;
+      camera.left = (-currentWidth / (WORLD_SCALE * 2)) * zoomScale;
+      camera.right = (currentWidth / (WORLD_SCALE * 2)) * zoomScale;
+      camera.top = (currentHeight / (WORLD_SCALE * 2)) * zoomScale;
+      camera.bottom = (-currentHeight / (WORLD_SCALE * 2)) * zoomScale;
       camera.updateProjectionMatrix();
 
       renderer.render(scene, camera);
