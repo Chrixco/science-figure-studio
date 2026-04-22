@@ -1,3 +1,4 @@
+import jsPDF from 'jspdf';
 import { Cell, ColorScheme, NetworkConfig } from '../types';
 import { calculateSmartLineSegments } from './geometry';
 
@@ -24,95 +25,289 @@ export function downloadFile(content: string, filename: string, type: string) {
   URL.revokeObjectURL(url);
 }
 
-// Export canvas as PNG
-export function exportToPNG(canvas: HTMLCanvasElement, filename: string, scale: number = 2) {
-  // Create a high-resolution canvas
-  const exportCanvas = document.createElement('canvas');
-  const ctx = exportCanvas.getContext('2d')!;
-
-  exportCanvas.width = canvas.width * scale;
-  exportCanvas.height = canvas.height * scale;
-
-  ctx.scale(scale, scale);
-  ctx.drawImage(canvas, 0, 0);
-
-  const link = document.createElement('a');
-  link.download = filename;
-  link.href = exportCanvas.toDataURL('image/png', 1.0);
-  link.click();
+// Helper: Create PNG with DPI metadata
+function createPNGWithDPI(blob: Blob, width: number, height: number, dpi: number = 300): Promise<Blob> {
+  return new Promise((resolve) => {
+    processPNGBlob(blob, width, height, dpi, resolve);
+  });
 }
 
-// Export as SVG
+function processPNGBlob(originalBlob: Blob, width: number, height: number, dpi: number, resolve: (blob: Blob) => void): void {
+  originalBlob.arrayBuffer().then((buffer) => {
+    const view = new Uint8Array(buffer);
+
+    // Convert DPI to pixels per meter for pHYs chunk
+    const pixelsPerMeter = Math.round(dpi / 0.0254);
+
+    // Create pHYs chunk
+    const pHYsData = new Uint8Array(9);
+    const dataView = new DataView(pHYsData.buffer);
+    dataView.setUint32(0, pixelsPerMeter, false); // x pixels per meter (big-endian)
+    dataView.setUint32(4, pixelsPerMeter, false); // y pixels per meter (big-endian)
+    pHYsData[8] = 1; // unit specifier (1 = meters)
+
+    const pHYsChunk = createChunk('pHYs', pHYsData);
+
+    // Insert pHYs chunk after IHDR (8 bytes + 13 bytes for IHDR chunk)
+    const newPNG = new Uint8Array(view.length + pHYsChunk.length);
+
+    // Copy PNG signature and IHDR
+    newPNG.set(view.slice(0, 33), 0);
+
+    // Insert pHYs chunk
+    newPNG.set(pHYsChunk, 33);
+
+    // Copy rest of PNG
+    newPNG.set(view.slice(33), 33 + pHYsChunk.length);
+
+    const finalBlob = new Blob([newPNG], { type: 'image/png' });
+    const physicalSize = {
+      width: (width / pixelsPerMeter * 0.0254).toFixed(2),
+      height: (height / pixelsPerMeter * 0.0254).toFixed(2)
+    };
+    console.log(`PNG created: ${width}x${height}px @ ${dpi} DPI (${physicalSize.width}cm × ${physicalSize.height}cm), size: ${(finalBlob.size / 1024 / 1024).toFixed(1)}MB`);
+    resolve(finalBlob);
+  });
+}
+
+// Helper: Create a PNG chunk with proper CRC
+function createChunk(type: string, data: Uint8Array): Uint8Array {
+  const length = data.length;
+  const chunk = new Uint8Array(12 + length);
+
+  // Length (4 bytes, big-endian)
+  const view = new DataView(chunk.buffer);
+  view.setUint32(0, length, false);
+
+  // Type (4 bytes)
+  const typeBytes = new TextEncoder().encode(type);
+  chunk.set(typeBytes, 4);
+
+  // Data
+  chunk.set(data, 8);
+
+  // CRC (4 bytes)
+  const crc = calculateCRC(chunk.slice(4, 8 + length));
+  view.setUint32(8 + length, crc, false);
+
+  return chunk;
+}
+
+// Helper: Calculate CRC32 for PNG chunks
+function calculateCRC(data: Uint8Array): number {
+  let crc = 0xffffffff;
+
+  for (let i = 0; i < data.length; i++) {
+    crc ^= data[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// Export canvas as PNG with high quality (native resolution, no scaling)
+export async function exportToPNG(canvas: HTMLCanvasElement, filename: string, dpi: number = 300) {
+  // For proper quality: use the canvas at its native resolution
+  // and embed DPI metadata so printing software knows the correct output size
+  // This avoids the washout from scaling screenshots
+
+  const originalBlob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
+
+  if (!originalBlob) {
+    alert('Failed to export canvas');
+    return;
+  }
+
+  console.log(`Exporting PNG at ${dpi} DPI (canvas size: ${canvas.width}x${canvas.height}px)`);
+
+  // Create PNG with DPI metadata
+  const blob = await createPNGWithDPI(originalBlob, canvas.width, canvas.height, dpi);
+
+  // Download
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Export canvas as PDF (lossless quality)
+export async function exportToPDF(canvas: HTMLCanvasElement, filename: string, dpi: number = 300) {
+  // Use canvas native resolution for PDF
+  console.log(`Exporting PDF at ${dpi} DPI (canvas size: ${canvas.width}x${canvas.height}px)`);
+
+  // Get high-quality image from canvas
+  const imgData = canvas.toDataURL('image/png');
+
+  // Calculate physical dimensions in inches (DPI conversion)
+  const widthInches = canvas.width / dpi;
+  const heightInches = canvas.height / dpi;
+
+  // Create PDF with proper dimensions
+  const pdf = new jsPDF({
+    orientation: widthInches > heightInches ? 'landscape' : 'portrait',
+    unit: 'in',
+    format: [widthInches, heightInches],
+    compress: true,
+  });
+
+  // Add image to PDF at full canvas size
+  pdf.addImage(imgData, 'PNG', 0, 0, widthInches, heightInches);
+
+  // Save PDF
+  pdf.save(filename);
+
+  const physicalSize = {
+    width: widthInches.toFixed(2),
+    height: heightInches.toFixed(2)
+  };
+  console.log(`PDF created: ${canvas.width}x${canvas.height}px @ ${dpi} DPI (${physicalSize.width}in × ${physicalSize.height}in)`);
+}
+
+// Export as SVG with proper bounds calculation
 export function exportToSVG(
   cells: Cell[],
   config: NetworkConfig,
   colors: ColorScheme,
-  width: number,
-  height: number
+  width: number = 1200,
+  height: number = 1200
 ): string {
-  const scaleX = width;
-  const scaleY = height;
+  // Calculate bounds with padding to ensure nothing gets cut off
+  const padding = 50; // pixels of padding around content
+  let minX = Infinity, maxX = -Infinity;
+  let minY = Infinity, maxY = -Infinity;
+
+  // Find bounds of all circles (cells and functions)
+  cells.forEach(cell => {
+    const cellLeft = cell.position.x - cell.radius;
+    const cellRight = cell.position.x + cell.radius;
+    const cellTop = cell.position.y - cell.radius;
+    const cellBottom = cell.position.y + cell.radius;
+
+    minX = Math.min(minX, cellLeft);
+    maxX = Math.max(maxX, cellRight);
+    minY = Math.min(minY, cellTop);
+    maxY = Math.max(maxY, cellBottom);
+
+    cell.functions.forEach(fn => {
+      const fnLeft = fn.position.x - fn.radius;
+      const fnRight = fn.position.x + fn.radius;
+      const fnTop = fn.position.y - fn.radius;
+      const fnBottom = fn.position.y + fn.radius;
+
+      minX = Math.min(minX, fnLeft);
+      maxX = Math.max(maxX, fnRight);
+      minY = Math.min(minY, fnTop);
+      maxY = Math.max(maxY, fnBottom);
+    });
+  });
+
+  // Handle default bounds if no cells
+  if (!isFinite(minX)) {
+    minX = 0;
+    maxX = 1;
+    minY = 0;
+    maxY = 1;
+  }
+
+  // Add padding
+  minX -= 0.05;
+  maxX += 0.05;
+  minY -= 0.05;
+  maxY += 0.05;
+
+  const contentWidth = maxX - minX;
+  const contentHeight = maxY - minY;
+
+  // Scale to fit in the SVG while maintaining aspect ratio
+  const scaleX = (width - padding * 2) / contentWidth;
+  const scaleY = (height - padding * 2) / contentHeight;
+  const scale = Math.min(scaleX, scaleY);
+
+  const offsetX = padding - minX * scale;
+  const offsetY = padding - minY * scale;
 
   let svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <defs>
+    <style>
+      .network-circle { fill: white; stroke-linecap: round; stroke-linejoin: round; }
+      .network-text { font-family: system-ui, sans-serif; text-anchor: middle; dominant-baseline: middle; }
+      .network-line { stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
   <rect width="100%" height="100%" fill="${colors.background}"/>
-  <g id="network">
+  <g id="network" transform="translate(${offsetX}, ${offsetY}) scale(${scale})">
 `;
 
-  // Collect all circles for smart line calculation
+  // Collect all circles for smart line calculation (using normalized coordinates)
+  // Only include visible functions
   const allCircles: Array<{ center: { x: number; y: number }; radius: number }> = [];
   cells.forEach(cell => {
     allCircles.push({
-      center: { x: cell.position.x * scaleX, y: cell.position.y * scaleY },
-      radius: cell.livingRadius * scaleX
+      center: { x: cell.position.x, y: cell.position.y },
+      radius: cell.livingRadius
     });
     cell.functions.forEach(fn => {
-      allCircles.push({
-        center: { x: fn.position.x * scaleX, y: fn.position.y * scaleY },
-        radius: fn.radius * scaleX
-      });
+      // Only include circles for visible functions
+      if (config.functionVisible[fn.type]) {
+        allCircles.push({
+          center: { x: fn.position.x, y: fn.position.y },
+          radius: fn.radius
+        });
+      }
     });
   });
 
   // Draw connections
   if (!config.linesOnTop) {
-    svg += drawConnectionsSVG(cells, config, colors, scaleX, scaleY, allCircles);
+    svg += drawConnectionsSVG(cells, config, colors, 1, 1, allCircles);
   }
 
   // Draw cells
   cells.forEach(cell => {
-    const cx = cell.position.x * scaleX;
-    const cy = cell.position.y * scaleY;
-    const cellR = cell.radius * scaleX;
-    const livingR = cell.livingRadius * scaleX;
+    const cx = cell.position.x;
+    const cy = cell.position.y;
+    const cellR = cell.radius;
+    const livingR = cell.livingRadius;
 
     // Cell border (dashed)
-    svg += `    <circle cx="${cx}" cy="${cy}" r="${cellR}" fill="none" stroke="${colors.cellBorder}" stroke-width="${config.cellOutlineWidth}" stroke-dasharray="8,4" opacity="0.6"/>
+    svg += `    <circle cx="${cx.toFixed(4)}" cy="${cy.toFixed(4)}" r="${cellR.toFixed(4)}" fill="none" stroke="${colors.cellBorder}" stroke-width="${(config.cellOutlineWidth / scale).toFixed(4)}" stroke-dasharray="${(8 / scale).toFixed(2)},${(4 / scale).toFixed(2)}" opacity="0.6"/>
 `;
 
     // Living circle
-    svg += `    <circle cx="${cx}" cy="${cy}" r="${livingR}" fill="${colors.living}" stroke="${colors.livingOutline}" stroke-width="${config.livingOutlineWidth}"/>
+    svg += `    <circle cx="${cx.toFixed(4)}" cy="${cy.toFixed(4)}" r="${livingR.toFixed(4)}" class="network-circle" fill="${colors.living}" stroke="${colors.livingOutline}" stroke-width="${(config.livingOutlineWidth / scale).toFixed(4)}"/>
 `;
-    svg += `    <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" fill="${colors.text}" font-size="${config.livingFontSize}" font-family="system-ui, sans-serif">living</text>
+    svg += `    <text x="${cx.toFixed(4)}" y="${cy.toFixed(4)}" class="network-text" fill="${colors.text}" font-size="${(config.livingFontSize / scale).toFixed(2)}">living</text>
 `;
 
-    // Function circles
+    // Function circles (only visible functions)
     cell.functions.forEach(fn => {
-      const fx = fn.position.x * scaleX;
-      const fy = fn.position.y * scaleY;
-      const fr = fn.radius * scaleX;
+      // Skip invisible functions
+      if (!config.functionVisible[fn.type]) return;
+
+      const fx = fn.position.x;
+      const fy = fn.position.y;
+      const fr = fn.radius;
       const fnColor = colors.functions[fn.type];
 
-      svg += `    <circle cx="${fx}" cy="${fy}" r="${fr}" fill="white" stroke="${fnColor}" stroke-width="${config.functionOutlineWidth}"/>
+      svg += `    <circle cx="${fx.toFixed(4)}" cy="${fy.toFixed(4)}" r="${fr.toFixed(4)}" class="network-circle" fill="white" stroke="${fnColor}" stroke-width="${(config.functionOutlineWidth / scale).toFixed(4)}"/>
 `;
-      svg += `    <text x="${fx}" y="${fy}" text-anchor="middle" dominant-baseline="middle" fill="${colors.text}" font-size="${config.functionFontSize}" font-family="system-ui, sans-serif">${fn.type}</text>
+      svg += `    <text x="${fx.toFixed(4)}" y="${fy.toFixed(4)}" class="network-text" fill="${colors.text}" font-size="${(config.functionFontSize / scale).toFixed(2)}">${fn.type}</text>
 `;
     });
   });
 
   // Draw connections on top if configured
   if (config.linesOnTop) {
-    svg += drawConnectionsSVG(cells, config, colors, scaleX, scaleY, allCircles);
+    svg += drawConnectionsSVG(cells, config, colors, 1, 1, allCircles, scale);
   }
 
   svg += `  </g>
@@ -127,7 +322,8 @@ function drawConnectionsSVG(
   colors: ColorScheme,
   scaleX: number,
   scaleY: number,
-  allCircles: Array<{ center: { x: number; y: number }; radius: number }>
+  allCircles: Array<{ center: { x: number; y: number }; radius: number }>,
+  svgScale: number = 1
 ): string {
   let svg = '';
 
@@ -135,8 +331,11 @@ function drawConnectionsSVG(
     const livingX = cell.position.x * scaleX;
     const livingY = cell.position.y * scaleY;
 
-    // Internal connections
+    // Internal connections (only visible functions)
     cell.functions.forEach(fn => {
+      // Skip invisible functions
+      if (!config.functionVisible[fn.type]) return;
+
       const fnX = fn.position.x * scaleX;
       const fnY = fn.position.y * scaleY;
       const color = colors.functions[fn.type];
@@ -149,7 +348,7 @@ function drawConnectionsSVG(
       );
 
       segments.forEach(seg => {
-        svg += `    <line x1="${seg.start.x}" y1="${seg.start.y}" x2="${seg.end.x}" y2="${seg.end.y}" stroke="${color}" stroke-width="${seg.lineWidth}" opacity="${seg.opacity}" stroke-linecap="round"/>
+        svg += `    <line x1="${seg.start.x.toFixed(4)}" y1="${seg.start.y.toFixed(4)}" x2="${seg.end.x.toFixed(4)}" y2="${seg.end.y.toFixed(4)}" class="network-line" stroke="${color}" stroke-width="${(seg.lineWidth / svgScale).toFixed(4)}" opacity="${seg.opacity}" />
 `;
       });
     });
@@ -160,6 +359,9 @@ function drawConnectionsSVG(
         if (cellIndex === otherIndex) return;
 
         otherCell.functions.forEach(fn => {
+          // Skip invisible functions
+          if (!config.functionVisible[fn.type]) return;
+
           const fnX = fn.position.x * scaleX;
           const fnY = fn.position.y * scaleY;
           const color = colors.functions[fn.type];
@@ -172,7 +374,7 @@ function drawConnectionsSVG(
           );
 
           segments.forEach(seg => {
-            svg += `    <line x1="${seg.start.x}" y1="${seg.start.y}" x2="${seg.end.x}" y2="${seg.end.y}" stroke="${color}" stroke-width="${seg.lineWidth}" opacity="${seg.opacity * 0.5}" stroke-linecap="round"/>
+            svg += `    <line x1="${seg.start.x.toFixed(4)}" y1="${seg.start.y.toFixed(4)}" x2="${seg.end.x.toFixed(4)}" y2="${seg.end.y.toFixed(4)}" class="network-line" stroke="${color}" stroke-width="${(seg.lineWidth / svgScale).toFixed(4)}" opacity="${(seg.opacity * 0.5).toFixed(2)}" />
 `;
           });
         });

@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { Cell, ColorScheme } from '../types';
 import { Collision } from './collision3d';
+import { LightingSystem } from './lighting3d';
 
 /**
  * 3D Scene Management
  * Creates and manages Three.js 3D visualization of the network
  */
+
+export type VisualState = 'normal' | 'hover' | 'selected' | 'collision';
 
 export interface Scene3D {
   scene: THREE.Scene;
@@ -17,6 +20,155 @@ export interface Scene3D {
   materialCache: Map<string, THREE.Material>;
   geometryCache: Map<string, THREE.BufferGeometry>;
   cellMeshMap: Map<string, THREE.Mesh>; // Cell ID → living circle mesh
+  lightingSystem?: LightingSystem;
+}
+
+/**
+ * Visual state configuration for interactive feedback
+ */
+export const VISUAL_STATE_CONFIG: Record<VisualState, {
+  emissive: number;
+  emissiveIntensity: number;
+  colorOverride?: number;
+}> = {
+  normal: { emissive: 0x000000, emissiveIntensity: 0 },
+  hover: { emissive: 0x00ffff, emissiveIntensity: 0.3 },
+  selected: { emissive: 0x00ffff, emissiveIntensity: 0.6 },
+  collision: { emissive: 0xff6666, emissiveIntensity: 0.8, colorOverride: 0xff4444 }
+};
+
+/**
+ * Determine the visual state for a cell based on current interaction state
+ * Priority: collision > selected > hover > normal
+ */
+function determineVisualState(
+  cellId: string,
+  selectedIds: string[],
+  hoveredId: string | null,
+  collisionIds: Set<string>
+): VisualState {
+  if (collisionIds.has(cellId)) return 'collision';
+  if (selectedIds.includes(cellId)) return 'selected';
+  if (hoveredId === cellId) return 'hover';
+  return 'normal';
+}
+
+/**
+ * Update a cell's visual appearance based on its state
+ */
+export function updateCellVisual(
+  scene3D: Scene3D,
+  cellId: string,
+  state: VisualState,
+  colors: ColorScheme
+): void {
+  const mesh = scene3D.cellMeshMap.get(cellId);
+  if (!mesh) return;
+
+  const material = mesh.material as THREE.MeshPhongMaterial;
+  if (!material) return;
+
+  const config = VISUAL_STATE_CONFIG[state];
+
+  // Apply color override if present (for collision state)
+  if (config.colorOverride !== undefined) {
+    material.color.setHex(config.colorOverride);
+  } else if (state === 'normal') {
+    // Restore original color for normal state
+    material.color.copy(new THREE.Color(colors.living));
+  }
+
+  // Apply emissive settings
+  material.emissive.setHex(config.emissive);
+  material.emissiveIntensity = config.emissiveIntensity;
+}
+
+/**
+ * Clear all visual states except those in the exceptions set
+ */
+export function clearAllVisualStates(
+  scene3D: Scene3D,
+  colors: ColorScheme,
+  exceptions?: Set<string>
+): void {
+  for (const [cellId, mesh] of scene3D.cellMeshMap) {
+    if (exceptions && exceptions.has(cellId)) continue;
+
+    const material = mesh.material as THREE.MeshPhongMaterial;
+    if (!material) continue;
+
+    material.color.copy(new THREE.Color(colors.living));
+    material.emissive.setHex(0x000000);
+    material.emissiveIntensity = 0;
+  }
+}
+
+/**
+ * Update all cell visuals based on current interaction state
+ */
+export function updateAllCellVisuals(
+  scene3D: Scene3D,
+  cells: Cell[],
+  selectedIds: string[],
+  hoveredId: string | null,
+  collisionIds: Set<string>,
+  colors: ColorScheme
+): void {
+  for (const cell of cells) {
+    const state = determineVisualState(cell.id, selectedIds, hoveredId, collisionIds);
+    updateCellVisual(scene3D, cell.id, state, colors);
+  }
+}
+
+export interface FocusOptions {
+  duration?: number; // default: 1000ms
+  distance?: number; // default: 5 units
+}
+
+/**
+ * Smoothly animate camera to focus on a specific cell
+ */
+export function focusOnCell(
+  scene3D: Scene3D,
+  cellId: string,
+  options: FocusOptions = {}
+): void {
+  const cell = Array.from(scene3D.cellMeshMap.entries()).find(
+    ([id]) => id === cellId
+  );
+
+  if (!cell) return;
+
+  const { duration = 1000, distance = 5 } = options;
+  const mesh = cell[1];
+
+  // Calculate target position: cell position + offset for isometric view
+  const cellPosition = mesh.position.clone();
+  const targetPosition = new THREE.Vector3(
+    cellPosition.x + 2,
+    cellPosition.y + 2,
+    distance
+  );
+
+  const startPosition = scene3D.camera.position.clone();
+  const startTime = Date.now();
+
+  const animate = () => {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+
+    // Ease-out cubic
+    const easeProgress = 1 - Math.pow(1 - progress, 3);
+
+    scene3D.camera.position.lerpVectors(startPosition, targetPosition, easeProgress);
+    scene3D.camera.lookAt(cellPosition.x, cellPosition.y, 0);
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    }
+  };
+
+  animate();
 }
 
 /**
@@ -45,6 +197,7 @@ export function create3DScene(
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.domElement.setAttribute('data-network-canvas-3d', 'true');
   container.appendChild(renderer.domElement);
 
   // Create camera with proper aspect ratio
@@ -382,20 +535,12 @@ export function visualizeCollisions(
     overlappingCellIds.add(c.cell2Id);
   });
 
-  // Update living mesh colors
-  for (const [cellId, mesh] of scene3D.cellMeshMap.entries()) {
+  // Update living mesh colors using visual state system
+  for (const [cellId] of scene3D.cellMeshMap.entries()) {
     if (overlappingCellIds.has(cellId)) {
-      // Overlapping: mark as red with glow
-      const material = mesh.material as THREE.MeshPhongMaterial;
-      material.color.setHex(0xff4444); // Red
-      material.emissive.setHex(0xff6666); // Glow
-      material.emissiveIntensity = 0.8;
+      updateCellVisual(scene3D, cellId, 'collision', colors);
     } else {
-      // Not overlapping: restore original color
-      const material = mesh.material as THREE.MeshPhongMaterial;
-      material.color.copy(new THREE.Color(colors.living));
-      material.emissive.setHex(0x000000); // No glow
-      material.emissiveIntensity = 0;
+      updateCellVisual(scene3D, cellId, 'normal', colors);
     }
   }
 }

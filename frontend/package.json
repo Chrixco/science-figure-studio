@@ -12,6 +12,9 @@
   "dependencies": {
     "file-saver": "^2.0.5",
     "gif.js": "^0.2.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "pngjs": "^7.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "three": "^0.182.0",
@@ -21,6 +24,7 @@
   "devDependencies": {
     "@types/file-saver": "^2.0.7",
     "@types/gif.js": "^0.2.5",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@types/three": "^0.182.0",

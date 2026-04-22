@@ -11,7 +11,7 @@ import {
   Preset,
   LayoutTemplate
 } from '../types';
-import { generateNetwork, updateCellPosition, randomColor, createCell, generateCellPositions, CANVAS_SCALE, generateNetworkWithTemplate, calculateMinSpacing, calculateCellBorderRadius, recalculateCellGeometry } from '../utils/geometry';
+import { generateNetwork, updateCellPosition, randomColor, createCell, CANVAS_SCALE, generateNetworkWithTemplate, recalculateCellGeometry } from '../utils/geometry';
 
 // History entry for undo/redo
 interface HistoryEntry {
@@ -289,54 +289,21 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
       if (count === currentCount) return state;
 
-      if (count < currentCount) {
-        return {
-          cells: state.cells.slice(0, count),
-          config: { ...state.config, cellCount: count }
-        };
-      }
-
-      // Calculate cell border radius for bounds and spacing
-      const cellBorderRadius = calculateCellBorderRadius(
-        state.config.livingRadius * CANVAS_SCALE,
-        state.config.functionRadius * CANVAS_SCALE,
-        state.config.functionWeights
-      );
-
-      const edgePadding = cellBorderRadius * 1.15;
-      const bounds = {
-        minX: edgePadding,
-        maxX: CANVAS_SCALE - edgePadding,
-        minY: edgePadding,
-        maxY: CANVAS_SCALE - edgePadding
-      };
-
-      // Use consistent spacing calculation (uses dynamic cell radius internally)
-      const minSpacing = state.config.avoidOverlap
-        ? calculateMinSpacing(state.config, true)
-        : 0;
-
-      // Get existing cell positions to avoid collisions with them
-      const existingPositions = state.cells.map(cell => cell.position);
-
-      const newPositions = generateCellPositions(
-        count - currentCount,
-        minSpacing,
-        bounds,
-        existingPositions
-      );
-
-      // Create cells with scaled config - createCell will calculate dynamic radius
+      // ULTRATHINK FIX: Always regenerate with proper spacing
+      // Don't just slice or add - regenerate completely with new count
+      // This ensures consistent spacing across all cells
       const scaledConfig = {
         ...state.config,
+        cellCount: count,  // Update to new count
         livingRadius: state.config.livingRadius * CANVAS_SCALE,
         functionRadius: state.config.functionRadius * CANVAS_SCALE
       };
 
-      const newCells = newPositions.map((pos, i) => createCell(pos, scaledConfig, currentCount + i));
+      // Use generateNetwork to create new cells with proper spacing
+      const newCells = generateNetwork(scaledConfig);
 
       return {
-        cells: [...state.cells, ...newCells],
+        cells: newCells,
         config: { ...state.config, cellCount: count }
       };
     });

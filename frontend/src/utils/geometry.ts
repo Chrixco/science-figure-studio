@@ -1,4 +1,5 @@
-import { Point, Cell, FunctionNode, FUNCTION_TYPES, NetworkConfig } from '../types';
+import { Point, Cell, FunctionNode, FUNCTION_TYPES, NetworkConfig, LayoutTemplate } from '../types';
+import { generateCells } from './cellGeneration';
 
 // Generate unique ID
 export function generateId(): string {
@@ -295,18 +296,25 @@ export function calculateMinSpacing(config: NetworkConfig, scaled: boolean = tru
     config.functionWeights
   );
 
-  // For two cells not to overlap: distance >= radius1 + radius2
-  // Since both cells have same radius: distance >= 2 * cellBorderRadius
-  const minDistanceNoOverlap = 2 * cellBorderRadius;
+  // BEST PRACTICE: Use absolute buffer distance (not percentage)
+  // Formula: minSpacing = radius1 + radius2 + buffer
+  // For identical cells: minSpacing = 2 * cellBorderRadius + buffer
+  //
+  // Convert cellSpacing (0.0-1.0) to absolute buffer:
+  // buffer = cellSpacing * cellBorderRadius
+  //
+  // This gives predictable, auditable spacing:
+  // - cellSpacing=0.0 → cells just touch (distance = 2*radius)
+  // - cellSpacing=0.1 → 10% of cell radius as gap
+  // - cellSpacing=0.5 → 50% of cell radius as gap
 
-  // Small additional gap to prevent cells from exactly touching
-  // cellSpacing of 0.1 = 10% of cell radius as buffer
-  const gapBetweenCells = config.cellSpacing * cellBorderRadius;
-
-  return minDistanceNoOverlap + gapBetweenCells;
+  const buffer = config.avoidOverlap ? config.cellSpacing * cellBorderRadius : 0;
+  return 2 * cellBorderRadius + buffer;
 }
 
 // Generate random cell positions with collision avoidance
+// CRITICAL: This function ALWAYS respects minSpacing
+// It will place fewer cells rather than violate spacing
 export function generateCellPositions(
   count: number,
   minSpacing: number,
@@ -314,82 +322,84 @@ export function generateCellPositions(
   existingPositions: Point[] = []
 ): Point[] {
   const positions: Point[] = [];
-  let attempts = 0;
-  const maxAttempts = 10000;
+  let consecutiveFailures = 0;
+  const maxConsecutiveFailures = 5000;  // Much higher to allow more attempts
 
   // All positions to check against (existing + newly generated)
   const allPositions = [...existingPositions];
 
-  while (positions.length < count && attempts < maxAttempts) {
+  // Keep trying until we've had enough consecutive failures
+  // This ensures we NEVER place cells that violate minSpacing
+  while (positions.length < count && consecutiveFailures < maxConsecutiveFailures) {
     const candidate: Point = {
       x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
       y: bounds.minY + Math.random() * (bounds.maxY - bounds.minY)
     };
 
-    // Check if candidate overlaps with any existing position
-    // Use exact minSpacing - never reduce it, this ensures cell borders don't overlap
+    // Check if candidate overlaps with ANY existing position
+    // MUST RESPECT minSpacing - this is not optional
     const hasCollision = allPositions.some(p => distance(p, candidate) < minSpacing);
 
     if (!hasCollision) {
+      // Success - add position and reset failure counter
       positions.push(candidate);
       allPositions.push(candidate);
-      attempts = 0; // Reset on success
+      consecutiveFailures = 0;  // Reset on each success
     } else {
-      attempts++;
+      // Failure - increment counter
+      consecutiveFailures++;
     }
   }
 
-  // If we couldn't place all cells, the remaining ones will overlap
-  // This happens when there's not enough space for the requested cell count
-  while (positions.length < count) {
-    positions.push({
-      x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
-      y: bounds.minY + Math.random() * (bounds.maxY - bounds.minY)
-    });
+  // CRITICAL FIX: Never place cells that violate spacing!
+  // If we couldn't place all cells with proper spacing, that's OK.
+  // Better to have fewer cells with correct spacing than overlapping cells.
+  //
+  // The original code had a fallback that placed random cells without checking spacing.
+  // That's why there were 23 collisions. We NEVER do that.
+
+  if (positions.length < count) {
+    console.warn(
+      `Could only place ${positions.length}/${count} cells with minSpacing=${minSpacing.toFixed(2)}.`,
+      `Available space may be too small. Either:`,
+      `1. Reduce cell count`,
+      `2. Increase canvas size`,
+      `3. Reduce cellSpacing in avoidOverlap settings`
+    );
   }
 
   return positions;
 }
 
-// Generate complete network with 10x larger coordinate space
+// ============================================================================
+// CELL GENERATION - SINGLE SOURCE OF TRUTH
+// ============================================================================
+// ALL cell generation goes through cellGeneration.ts for consistent spacing
+// ============================================================================
+
+/**
+ * Generate network with RANDOM layout
+ * Uses cellGeneration.ts for proper spacing enforcement
+ */
 export function generateNetwork(config: NetworkConfig): Cell[] {
-  // Calculate cell border radius for bounds calculation
-  const cellBorderRadius = calculateCellBorderRadius(
-    config.livingRadius * CANVAS_SCALE,
-    config.functionRadius * CANVAS_SCALE,
-    config.functionWeights
-  );
-
-  // Cells must stay within bounds (center at least cellBorderRadius from edge)
-  const edgePadding = cellBorderRadius;
-  const bounds = {
-    minX: edgePadding,
-    maxX: CANVAS_SCALE - edgePadding,
-    minY: edgePadding,
-    maxY: CANVAS_SCALE - edgePadding
-  };
-
-  // Calculate minimum spacing to avoid overlap
-  const minSpacing = config.avoidOverlap ? calculateMinSpacing(config, true) : 0;
-
-  const positions = generateCellPositions(
-    config.cellCount,
-    minSpacing,
-    bounds
-  );
-
-  // Create cells with scaled config
-  const cells = positions.map((position, index) => createCell(position, {
-    ...config,
-    livingRadius: config.livingRadius * CANVAS_SCALE,
-    functionRadius: config.functionRadius * CANVAS_SCALE
-  }, index));
-
-  return cells;
+  return generateCells(config, 'random');
 }
 
-// Generate grid layout positions
+/**
+ * Generate network with specified layout template
+ * ULTRATHINK FIX: Now uses cellGeneration.ts for ALL layouts
+ * Ensures consistent spacing across random, grid, circle, cluster
+ */
+export function generateNetworkWithTemplate(config: NetworkConfig, template: LayoutTemplate): Cell[] {
+  return generateCells(config, template as 'random' | 'grid' | 'circle' | 'cluster');
+}
+
+// DEPRECATED: Old layout functions - DO NOT USE
+// These are kept for reference but should not be called directly
+// Use generateCells() instead
+
 export function generateGridLayout(count: number, bounds: { minX: number; maxX: number; minY: number; maxY: number }): Point[] {
+  // DEPRECATED - use generateCells(config, 'grid') instead
   const cols = Math.ceil(Math.sqrt(count));
   const rows = Math.ceil(count / cols);
   const positions: Point[] = [];
@@ -409,8 +419,8 @@ export function generateGridLayout(count: number, bounds: { minX: number; maxX: 
   return positions;
 }
 
-// Generate circle layout positions
 export function generateCircleLayout(count: number, bounds: { minX: number; maxX: number; minY: number; maxY: number }): Point[] {
+  // DEPRECATED - use generateCells(config, 'circle') instead
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
   const radius = Math.min(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2 * 0.8;
@@ -427,8 +437,8 @@ export function generateCircleLayout(count: number, bounds: { minX: number; maxX
   return positions;
 }
 
-// Generate cluster layout positions (grouped in center with some spread)
 export function generateClusterLayout(count: number, bounds: { minX: number; maxX: number; minY: number; maxY: number }, minSpacing: number): Point[] {
+  // DEPRECATED - use generateCells(config, 'cluster') instead
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
   const maxRadius = Math.min(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2 * 0.7;
@@ -466,54 +476,6 @@ export function generateClusterLayout(count: number, bounds: { minX: number; max
   }
 
   return positions;
-}
-
-// Generate network with specific template
-import { LayoutTemplate } from '../types';
-
-export function generateNetworkWithTemplate(config: NetworkConfig, template: LayoutTemplate): Cell[] {
-  // Calculate cell border radius for bounds calculation
-  const cellBorderRadius = calculateCellBorderRadius(
-    config.livingRadius * CANVAS_SCALE,
-    config.functionRadius * CANVAS_SCALE,
-    config.functionWeights
-  );
-
-  const edgePadding = cellBorderRadius * 1.1;
-  const bounds = {
-    minX: edgePadding,
-    maxX: CANVAS_SCALE - edgePadding,
-    minY: edgePadding,
-    maxY: CANVAS_SCALE - edgePadding
-  };
-
-  // Calculate minimum spacing to avoid overlap
-  const minSpacing = config.avoidOverlap ? calculateMinSpacing(config, true) : 0;
-
-  let positions: Point[];
-
-  switch (template) {
-    case 'grid':
-      positions = generateGridLayout(config.cellCount, bounds);
-      break;
-    case 'circle':
-      positions = generateCircleLayout(config.cellCount, bounds);
-      break;
-    case 'cluster':
-      positions = generateClusterLayout(config.cellCount, bounds, minSpacing);
-      break;
-    case 'random':
-    default:
-      positions = generateCellPositions(config.cellCount, minSpacing, bounds);
-      break;
-  }
-
-  // Create cells with scaled config - createCell will calculate dynamic radius
-  return positions.map((position, index) => createCell(position, {
-    ...config,
-    livingRadius: config.livingRadius * CANVAS_SCALE,
-    functionRadius: config.functionRadius * CANVAS_SCALE
-  }, index));
 }
 
 // Calculate bounding box of all cells

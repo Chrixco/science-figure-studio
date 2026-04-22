@@ -808,7 +808,7 @@ function CameraControls({
 // TAB COMPONENTS
 // ============================================================================
 
-type TabId = 'layout' | 'graph';
+type TabId = 'layout' | 'graph' | 'cellular';
 
 interface TabProps {
   id: TabId;
@@ -842,10 +842,10 @@ function Tab({ label, icon, active, onClick }: TabProps) {
 // ============================================================================
 
 interface ControlPanelProps {
-  onSetGraphMode?: (active: boolean) => void;
+  onSetMode?: (mode: 'mitosis' | 'graph' | 'cellular') => void;
 }
 
-export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
+export function ControlPanel({ onSetMode }: ControlPanelProps = {}) {
   // Load session data on mount
   useEffect(() => {
     const sessionData = sessionStorage.getItem('networkSessionData');
@@ -894,6 +894,7 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
 
   const [activeTab, setActiveTab] = useState<TabId>('layout');
   const [layoutSubTab, setLayoutSubTab] = useState<'style' | 'functions' | 'export'>('style');
+  const [cellularSubTab, setCellularSubTab] = useState<'style' | 'functions' | 'export'>('style');
   const [isExportingGif, setIsExportingGif] = useState(false);
   const [gifProgress, setGifProgress] = useState(0);
   const [presetName, setPresetName] = useState('');
@@ -3114,25 +3115,25 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
             <IconButton
               icon={Icons.undo}
               onClick={() => {
-                if (activeTab === 'graph') {
+                if (activeTab === 'graph' || activeTab === 'cellular') {
                   undoBauble();
                 } else {
                   undo();
                 }
               }}
-              disabled={activeTab === 'graph' ? !canUndoBauble : !canUndo}
+              disabled={activeTab === 'graph' || activeTab === 'cellular' ? !canUndoBauble : !canUndo}
               title="Undo (Ctrl+Z)"
             />
             <IconButton
               icon={Icons.redo}
               onClick={() => {
-                if (activeTab === 'graph') {
+                if (activeTab === 'graph' || activeTab === 'cellular') {
                   redoBauble();
                 } else {
                   redo();
                 }
               }}
-              disabled={activeTab === 'graph' ? !canRedoBauble : !canRedo}
+              disabled={activeTab === 'graph' || activeTab === 'cellular' ? !canRedoBauble : !canRedo}
               title="Redo (Ctrl+Y)"
             />
           </div>
@@ -3149,7 +3150,7 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
             active={activeTab === 'layout'}
             onClick={() => {
               setActiveTab('layout');
-              onSetGraphMode?.(false);
+              onSetMode?.('mitosis');
             }}
           />
           <Tab
@@ -3159,7 +3160,17 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
             active={activeTab === 'graph'}
             onClick={() => {
               setActiveTab('graph');
-              onSetGraphMode?.(true);
+              onSetMode?.('graph');
+            }}
+          />
+          <Tab
+            id="cellular"
+            label="Cellular"
+            icon={Icons.graph}
+            active={activeTab === 'cellular'}
+            onClick={() => {
+              setActiveTab('cellular');
+              onSetMode?.('cellular');
             }}
           />
         </div>
@@ -3271,11 +3282,77 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
             {renderGraphTab()}
           </div>
         )}
+        {activeTab === 'cellular' && (
+          <>
+            {/* Camera Controls - always visible */}
+            <div className="flex-shrink-0 px-3 py-2 border-b border-gray-800 bg-gray-900/50 pointer-events-auto">
+              <CameraControls
+                title="Graph Navigation"
+                showPanControls={true}
+                showZoomControls={true}
+                showResetControls={true}
+                panStep={30}
+              />
+            </div>
+
+            {/* Sub-navbar: Style | Functions | Export */}
+            <div className="flex-shrink-0 px-2 py-2 border-b border-gray-800 bg-gray-900/50 pointer-events-auto">
+              <div className="flex gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCellularSubTab('style');
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded text-xs font-medium transition-all ${
+                    cellularSubTab === 'style'
+                      ? 'bg-gray-700 text-accent-cyan'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                  }`}
+                >
+                  Style
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCellularSubTab('functions');
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded text-xs font-medium transition-all ${
+                    cellularSubTab === 'functions'
+                      ? 'bg-gray-700 text-accent-cyan'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                  }`}
+                >
+                  Functions
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCellularSubTab('export');
+                  }}
+                  className={`flex-1 py-1.5 px-2 rounded text-xs font-medium transition-all ${
+                    cellularSubTab === 'export'
+                      ? 'bg-gray-700 text-accent-cyan'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                  }`}
+                >
+                  Export
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-tab content */}
+            <div className="flex-1 overflow-y-auto p-3">
+              {cellularSubTab === 'style' && renderStyleTab()}
+              {cellularSubTab === 'functions' && renderFunctionsTab()}
+              {cellularSubTab === 'export' && renderExportTab()}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Footer */}
       <div className="flex-shrink-0 px-4 py-2 border-t border-gray-800 bg-gray-900/50">
-        {activeTab === 'graph' ? (
+        {activeTab === 'graph' || activeTab === 'cellular' ? (
           <div className="text-[10px] text-gray-600 space-y-1">
             <p className="text-center">
               <span className="text-gray-400 font-semibold">Bauble Canvas:</span>

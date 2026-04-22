@@ -1,9 +1,18 @@
-import { Cell } from '../types';
-
 /**
  * 3D Collision Detection System
- * Efficiently detects overlapping cells in 3D space
+ * Uses the spacing.ts module for all collision calculations
+ * Ensures 2D and 3D use identical formulas
+ *
+ * Sources:
+ * - https://www.jeffreythompson.org/collision-detection/circle-circle.php
+ * - https://www.toptal.com/game/video-game-physics-part-ii-collision-detection-for-solid-objects
  */
+
+import { Cell } from '../types';
+import {
+  detectAllCollisions as coreDetectCollisions,
+  resolveCollisions as coreResolveCollisions
+} from './spacing';
 
 export interface Collision {
   id: string;
@@ -13,7 +22,7 @@ export interface Collision {
   cell2Label: string;
   distance: number;
   minDistance: number;
-  overlapAmount: number; // How much they overlap
+  overlapAmount: number;
 }
 
 export interface CollisionStats {
@@ -25,148 +34,31 @@ export interface CollisionStats {
 }
 
 /**
- * Spatial Hash Grid for efficient collision detection
- * Divides 3D space into cells to avoid O(n²) comparisons
+ * Detect all collisions in 3D space
+ * Uses spatial hashing for O(n) average performance
+ *
+ * @param cells Array of cells to check
+ * @param buffer Buffer distance (0 for raw collision detection)
+ * @returns Array of collisions
  */
-export class SpatialHash {
-  private cellSize: number;
-  private grid: Map<string, Cell[]>;
+export function detectCollisions(cells: Cell[], buffer: number = 0): Collision[] {
+  const coreCollisions = coreDetectCollisions(cells, buffer);
 
-  constructor(cellSize: number = 1.0) {
-    this.cellSize = cellSize;
-    this.grid = new Map();
-  }
+  return coreCollisions.map(col => {
+    const cell1 = cells.find(c => c.id === col.cell1Id);
+    const cell2 = cells.find(c => c.id === col.cell2Id);
 
-  /**
-   * Get grid key for a position
-   */
-  private getGridKey(x: number, y: number, z: number): string {
-    const gx = Math.floor(x / this.cellSize);
-    const gy = Math.floor(y / this.cellSize);
-    const gz = Math.floor(z / this.cellSize);
-    return `${gx},${gy},${gz}`;
-  }
-
-  /**
-   * Add cell to spatial hash
-   */
-  addCell(cell: Cell): void {
-    const key = this.getGridKey(cell.position.x, cell.position.y, 0);
-    if (!this.grid.has(key)) {
-      this.grid.set(key, []);
-    }
-    this.grid.get(key)!.push(cell);
-  }
-
-  /**
-   * Get candidate cells for collision (neighbors + self)
-   */
-  getCandidates(cell: Cell): Cell[] {
-    const candidates = new Set<Cell>();
-    const x = cell.position.x;
-    const y = cell.position.y;
-    const z = 0;
-
-    // Check current cell and 8 neighbors
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const key = this.getGridKey(
-          x + dx * this.cellSize,
-          y + dy * this.cellSize,
-          z
-        );
-        const cellsInBucket = this.grid.get(key) || [];
-        cellsInBucket.forEach(c => candidates.add(c));
-      }
-    }
-
-    return Array.from(candidates);
-  }
-
-  /**
-   * Build hash from all cells
-   */
-  build(cells: Cell[]): void {
-    this.grid.clear();
-    cells.forEach(cell => this.addCell(cell));
-  }
-
-  /**
-   * Clear the hash
-   */
-  clear(): void {
-    this.grid.clear();
-  }
-}
-
-/**
- * Calculate distance between two cells
- */
-export function calculateDistance(
-  cell1: Cell,
-  cell2: Cell
-): number {
-  const dx = cell2.position.x - cell1.position.x;
-  const dy = cell2.position.y - cell1.position.y;
-  // All cells are in the same XY plane (z = 0)
-
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-/**
- * Get collision radius (living circle radius)
- */
-function getCollisionRadius(cell: Cell): number {
-  return cell.livingRadius;
-}
-
-/**
- * Detect all collisions between cells
- */
-export function detectCollisions(cells: Cell[]): Collision[] {
-  const collisions: Collision[] = [];
-  const spatialHash = new SpatialHash(2.0); // Grid cell size = 2.0
-  spatialHash.build(cells);
-
-  const checkedPairs = new Set<string>();
-
-  for (const cell1 of cells) {
-    const candidates = spatialHash.getCandidates(cell1);
-
-    for (const cell2 of candidates) {
-      // Skip same cell
-      if (cell1.id === cell2.id) continue;
-
-      // Skip if already checked this pair
-      const pairKey = [cell1.id, cell2.id].sort().join('|');
-      if (checkedPairs.has(pairKey)) continue;
-      checkedPairs.add(pairKey);
-
-      // Calculate distance
-      const distance = calculateDistance(cell1, cell2);
-      const radius1 = getCollisionRadius(cell1);
-      const radius2 = getCollisionRadius(cell2);
-      const minDistance = radius1 + radius2;
-
-      // Check for overlap
-      if (distance < minDistance) {
-        const overlapAmount = minDistance - distance;
-
-        collisions.push({
-          id: `${cell1.id}-${cell2.id}`,
-          cell1Id: cell1.id,
-          cell2Id: cell2.id,
-          cell1Label: cell1.label,
-          cell2Label: cell2.label,
-          distance: parseFloat(distance.toFixed(2)),
-          minDistance: parseFloat(minDistance.toFixed(2)),
-          overlapAmount: parseFloat(overlapAmount.toFixed(2))
-        });
-      }
-    }
-  }
-
-  return collisions;
+    return {
+      id: col.id,
+      cell1Id: col.cell1Id,
+      cell2Id: col.cell2Id,
+      cell1Label: cell1?.label || 'Unknown',
+      cell2Label: cell2?.label || 'Unknown',
+      distance: col.distance,
+      minDistance: cell1!.radius + cell2!.radius + buffer,
+      overlapAmount: col.overlap
+    };
+  });
 }
 
 /**
@@ -183,7 +75,6 @@ export function getCollisionStats(
     overlappingCellIds.add(collision.cell2Id);
   });
 
-  // Calculate severity
   const overlapRatio = overlappingCellIds.size / cells.length;
   let severity: 'none' | 'low' | 'medium' | 'high' = 'none';
 
@@ -207,7 +98,7 @@ export function getCollisionStats(
 }
 
 /**
- * Check if a specific cell is overlapping with any other
+ * Check if specific cell is colliding
  */
 export function isCellOverlapping(
   cellId: string,
@@ -227,53 +118,26 @@ export function getCellCollisions(
 }
 
 /**
- * Resolve overlaps by gently pushing cells apart
+ * Resolve overlapping cells by pushing them apart
+ *
+ * @param cells Array of cells
+ * @param buffer Spacing buffer (default: 0)
+ * @param maxIterations Maximum iterations (default: 10)
+ * @returns Resolved cells with updated positions
  */
-export function resolveOverlapsByPushing(
+export function autoResolveCollisions(
   cells: Cell[],
-  collisions: Collision[],
-  iterations: number = 3
+  buffer: number = 0,
+  maxIterations: number = 10
 ): Cell[] {
-  // Deep copy cells for modification
-  const resolvedCells = cells.map(c => ({
-    ...c,
-    position: { ...c.position }
-  }));
-
-  // Iteratively push apart overlapping cells
-  for (let iter = 0; iter < iterations; iter++) {
-    for (const collision of collisions) {
-      const cell1 = resolvedCells.find(c => c.id === collision.cell1Id);
-      const cell2 = resolvedCells.find(c => c.id === collision.cell2Id);
-
-      if (!cell1 || !cell2) continue;
-
-      // Calculate current distance
-      const distance = calculateDistance(cell1, cell2);
-      if (distance === 0) continue; // Prevent division by zero
-
-      // Direction from cell1 to cell2
-      const dx = cell2.position.x - cell1.position.x;
-      const dy = cell2.position.y - cell1.position.y;
-      const normalizedDx = dx / distance;
-      const normalizedDy = dy / distance;
-
-      // How much to push apart
-      const radius1 = getCollisionRadius(cell1);
-      const radius2 = getCollisionRadius(cell2);
-      const minDistance = radius1 + radius2;
-      const pushDistance = (minDistance - distance) / 2 + 0.1; // + 0.1 gap
-
-      // Move cells apart
-      cell1.position.x -= normalizedDx * pushDistance;
-      cell1.position.y -= normalizedDy * pushDistance;
-
-      cell2.position.x += normalizedDx * pushDistance;
-      cell2.position.y += normalizedDy * pushDistance;
-    }
+  // First check if there are any collisions
+  const collisions = detectCollisions(cells, buffer);
+  if (collisions.length === 0) {
+    return cells;
   }
 
-  return resolvedCells;
+  // Use core resolution algorithm
+  return coreResolveCollisions(cells, buffer, maxIterations);
 }
 
 /**
@@ -284,7 +148,7 @@ export function formatCollisionInfo(collision: Collision): string {
 }
 
 /**
- * Get severity color
+ * Get severity color for display
  */
 export function getSeverityColor(severity: string): string {
   switch (severity) {
