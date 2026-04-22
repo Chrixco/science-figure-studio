@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { useViewState } from '../hooks/useViewState';
 import { calculateSmartLineSegments, calculateBoundingBox, CANVAS_SCALE } from '../utils/geometry';
+import { generateFunctionBasedLayout, generateFunctionConnections } from '../utils/functionBasedLayout';
 import { Point, FunctionType, LineStyle } from '../types';
 
 // Helper to convert LineStyle to canvas dash pattern
@@ -30,11 +31,14 @@ interface Connection {
 export function NetworkCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const drawRef = useRef<(() => void) | null>(null);
   const { cells, config, colors } = useNetworkStore();
   const { zoom, panX, panY, setZoom, zoomIn, zoomOut, setView } = useViewState();
 
   const [canvasSize, setCanvasSize] = useState(0);
   const [showConnections, setShowConnections] = useState(true);
+  const [interactionMode, setInteractionMode] = useState<'pan' | 'select'>('pan');
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Build list of all connections
   const getAllConnections = useCallback((): Connection[] => {
@@ -89,46 +93,28 @@ export function NetworkCanvas() {
     const centerX = width / 2;
     const centerY = height / 2;
 
-    const normalizedX = networkPoint.x * (width / CANVAS_SCALE);
-    const normalizedY = networkPoint.y * (height / CANVAS_SCALE);
+    // Convert network coordinates (0-10) to pixel coordinates
+    const pixelX = (networkPoint.x / CANVAS_SCALE) * width;
+    const pixelY = (networkPoint.y / CANVAS_SCALE) * height;
 
-    const canvasX = normalizedX * zoom + centerX + panX;
-    const canvasY = normalizedY * zoom + centerY + panY;
+    // Apply zoom and pan
+    const canvasX = centerX + (pixelX - centerX) * zoom + panX;
+    const canvasY = centerY + (pixelY - centerY) * zoom + panY;
 
     return { x: canvasX, y: canvasY };
   }, [zoom, panX, panY]);
 
-  // Auto-fit on initial load
+  // Auto-fit on initial load only (once)
   useEffect(() => {
-    if (cells.length > 0 && canvasSize > 0) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
-      const height = rect.height;
-
-      const bbox = calculateBoundingBox(cells);
-
-      // Calculate zoom to fit bounding box
-      const scaleX = width / (bbox.width * (width / CANVAS_SCALE));
-      const scaleY = height / (bbox.height * (height / CANVAS_SCALE));
-      const newZoom = Math.min(scaleX, scaleY) * 0.9;
-
-      // Calculate pan to center the bounding box
-      const centerX = width / 2;
-      const centerY = height / 2;
-      const networkCenterX = (bbox.centerX - CANVAS_SCALE / 2) * width / CANVAS_SCALE;
-      const networkCenterY = (bbox.centerY - CANVAS_SCALE / 2) * height / CANVAS_SCALE;
-
-      const newPanX = centerX - networkCenterX * newZoom;
-      const newPanY = centerY - networkCenterY * newZoom;
-
-      setView(newZoom, newPanX, newPanY);
+    if (cells.length > 0 && canvasSize > 0 && !isInitialized) {
+      // Simple: zoom to 1.0 and center (0, 0)
+      // Network coordinates 0-10 will be displayed at actual pixel size
+      setView(1.0, 0, 0);
+      setIsInitialized(true);
     }
-  }, [cells, canvasSize, setView]);
+  }, [canvasSize, isInitialized, setView]);
 
-  // Draw the network
+  // Draw the network based on function-based layout
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -145,115 +131,115 @@ export function NetworkCanvas() {
 
     const sizeScale = (width / CANVAS_SCALE) * zoom;
 
-    // Collect all circles for smart line calculation
-    const allCircles = cells.flatMap(cell => [
-      { center: networkToCanvas(cell.position, canvas), radius: cell.livingRadius * sizeScale },
-      ...cell.functions.map(fn => ({
-        center: networkToCanvas(fn.position, canvas),
-        radius: fn.radius * sizeScale
-      }))
-    ]);
+    // Generate function-based layout
+    const layoutNodes = generateFunctionBasedLayout(
+      cells,
+      width,
+      height,
+      config.functionLabels,
+      config.functionWeights,
+      config.functionVisible
+    );
 
-    // Draw connections
+    // Separate nodes by type
+    const functionNodes = layoutNodes.filter(n => n.type === 'function');
+    const cellNodes = layoutNodes.filter(n => n.type === 'cell');
+
+    // Draw connections between cells (if enabled)
     if (showConnections) {
-      const connections = getAllConnections();
+      const connections = generateFunctionConnections(
+        cells,
+        config.functionLabels,
+        config.functionVisible
+      );
+
       connections.forEach(conn => {
-        const fromPos = networkToCanvas(conn.from, canvas);
-        const toPos = networkToCanvas(conn.to, canvas);
-        const toCircles = allCircles.filter(c =>
-          Math.hypot(c.center.x - toPos.x, c.center.y - toPos.y) < c.radius + 5
-        );
+        const fromNode = cellNodes.find(n => n.cellId === conn.fromCellId);
+        const toNode = cellNodes.find(n => n.cellId === conn.toCellId);
 
-        ctx.strokeStyle = conn.color;
-        ctx.globalAlpha = conn.opacity;
-        ctx.lineWidth = config.lineWidth * sizeScale;
-        ctx.setLineDash(getLineDash(config.lineStyle, config.lineWidth));
+        if (fromNode && toNode) {
+          const fromPos = networkToCanvas(fromNode.position, canvas);
+          const toPos = networkToCanvas(toNode.position, canvas);
 
-        const circleList = toCircles.length > 0 ? toCircles : [];
-        const smartSegments = calculateSmartLineSegments(fromPos, toPos, circleList, config.lineWidth);
+          ctx.strokeStyle = colors.cellBorder;
+          ctx.globalAlpha = 0.2 * conn.strength;
+          ctx.lineWidth = config.lineWidth * sizeScale;
+          ctx.setLineDash(getLineDash(config.lineStyle, config.lineWidth));
 
-        smartSegments.forEach((segment) => {
           ctx.beginPath();
-          ctx.moveTo(segment.start.x, segment.start.y);
-          ctx.lineTo(segment.end.x, segment.end.y);
+          ctx.moveTo(fromPos.x, fromPos.y);
+          ctx.lineTo(toPos.x, toPos.y);
           ctx.stroke();
-        });
 
-        ctx.setLineDash([]);
-        ctx.globalAlpha = 1;
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+        }
       });
     }
 
-    // Draw cells
-    cells.forEach(cell => {
-      const center = networkToCanvas(cell.position, canvas);
-      const cellRadius = cell.radius * sizeScale;
-      const livingRadius = cell.livingRadius * sizeScale;
+    // Draw function nodes
+    functionNodes.forEach((node) => {
+      const center = networkToCanvas(node.position, canvas);
+      const radius = node.radius * sizeScale;
 
-      // Cell border
+      if (!node.functionType) return;
+
+      // Function circle background
       ctx.beginPath();
-      ctx.arc(center.x, center.y, cellRadius, 0, Math.PI * 2);
-      ctx.strokeStyle = colors.cellBorder;
-      ctx.lineWidth = config.cellOutlineWidth;
-      ctx.setLineDash(getLineDash(config.cellOutlineStyle, config.cellOutlineWidth));
-      ctx.globalAlpha = 0.6;
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = colors.functionBackground[node.functionType];
+      ctx.fill();
+
+      // Function circle border
+      ctx.strokeStyle = colors.functions[node.functionType];
+      ctx.lineWidth = config.functionOutlineWidth;
+      ctx.setLineDash(getLineDash(config.functionOutlineStyle, config.functionOutlineWidth));
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
 
-      // Living circle
+      // Function text
+      const fontSize = Math.min(config.functionFontSize * zoom * 2, config.functionFontSize * 3);
+      ctx.fillStyle = colors.functionText[node.functionType];
+      ctx.font = `bold ${fontSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(node.label, center.x, center.y);
+    });
+
+    // Draw cell nodes
+    cellNodes.forEach((node) => {
+      const center = networkToCanvas(node.position, canvas);
+      const radius = node.radius * sizeScale;
+
+      // Cell background
       ctx.beginPath();
-      ctx.arc(center.x, center.y, livingRadius, 0, Math.PI * 2);
+      ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = colors.living;
       ctx.fill();
+
+      // Cell border
       ctx.strokeStyle = colors.livingOutline;
       ctx.lineWidth = config.livingOutlineWidth;
       ctx.setLineDash(getLineDash(config.livingOutlineStyle, config.livingOutlineWidth));
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Living text
-      const livingFontSize = Math.min(config.livingFontSize * zoom * 2, config.livingFontSize * 3);
+      // Cell text
+      const fontSize = Math.min(config.livingFontSize * zoom * 2, config.livingFontSize * 3);
       ctx.fillStyle = colors.livingText;
-      ctx.font = `bold ${livingFontSize}px Arial`;
+      ctx.font = `bold ${fontSize}px Arial`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(config.livingLabel, center.x, center.y);
+      ctx.fillText(node.label, center.x, center.y);
     });
+  }, [cells, colors, config, zoom, panX, panY, showConnections, networkToCanvas]);
 
-    // Draw function circles
-    cells.forEach(cell => {
-      cell.functions.forEach(fn => {
-        if (!config.functionVisible[fn.type]) return;
+  // Update the draw ref whenever draw changes
+  useEffect(() => {
+    drawRef.current = draw;
+  }, [draw]);
 
-        const center = networkToCanvas(fn.position, canvas);
-        const radius = fn.radius * sizeScale;
-
-        // Function circle background
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = colors.functionBackground[fn.type];
-        ctx.fill();
-
-        // Function circle border
-        ctx.strokeStyle = colors.functions[fn.type];
-        ctx.lineWidth = config.functionOutlineWidth;
-        ctx.setLineDash(getLineDash(config.functionOutlineStyle, config.functionOutlineWidth));
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Function text
-        const fontSize = Math.min(config.functionFontSize * zoom * 2, config.functionFontSize * 3);
-        ctx.fillStyle = colors.functionText[fn.type];
-        ctx.font = `bold ${fontSize}px Arial`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(config.functionLabels[fn.type] || fn.type, center.x, center.y);
-      });
-    });
-  }, [cells, colors, config, zoom, panX, panY, showConnections, networkToCanvas, getAllConnections]);
-
-  // Setup canvas and animation loop
+  // Setup canvas and animation loop (only once)
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -272,15 +258,16 @@ export function NetworkCanvas() {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
+    // Use ref to avoid recreating interval on every draw change
     const animationId = setInterval(() => {
-      draw();
+      if (drawRef.current) drawRef.current();
     }, 1000 / 60); // 60 FPS
 
     return () => {
       window.removeEventListener('resize', resizeCanvas);
       clearInterval(animationId);
     };
-  }, [draw]);
+  }, []); // Empty dependency array - only run once
 
   // Attach wheel listener with { passive: false } for zoom
   const handleWheel = useCallback((e: WheelEvent) => {
@@ -346,6 +333,29 @@ export function NetworkCanvas() {
           title="Toggle Connections"
         >
           ∿
+        </button>
+        <div className="w-px bg-gray-700" />
+        <button
+          onClick={() => setInteractionMode('pan')}
+          className={`px-2 py-1 rounded text-sm transition-colors ${
+            interactionMode === 'pan'
+              ? 'text-accent-cyan bg-accent-cyan/10'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+          }`}
+          title="Pan Mode"
+        >
+          🖐️
+        </button>
+        <button
+          onClick={() => setInteractionMode('select')}
+          className={`px-2 py-1 rounded text-sm transition-colors ${
+            interactionMode === 'select'
+              ? 'text-accent-cyan bg-accent-cyan/10'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+          }`}
+          title="Select Mode"
+        >
+          ⬜
         </button>
       </div>
     </div>
