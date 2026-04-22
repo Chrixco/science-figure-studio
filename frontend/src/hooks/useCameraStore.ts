@@ -37,9 +37,9 @@ export interface CameraActions {
   setBounds: (minZoom: number, maxZoom: number) => void;
 }
 
-const DEFAULT_ZOOM = 0.6;
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 3;
+const DEFAULT_ZOOM = 0.1;
+const MIN_ZOOM = 0.05;
+const MAX_ZOOM = 10;
 
 export const useCameraStore = create<CameraState & CameraActions>((set, get) => ({
   // Initial state

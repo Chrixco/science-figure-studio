@@ -334,7 +334,7 @@ export function NetworkCanvas() {
     if (isPanning && panStartRef.current) {
       const dx = e.clientX - panStartRef.current.x;
       const dy = e.clientY - panStartRef.current.y;
-      pan(dx, dy);
+      pan(dx * 0.01, dy * 0.01);
       panStartRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
