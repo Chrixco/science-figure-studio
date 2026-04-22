@@ -258,13 +258,25 @@ export function NetworkCanvas() {
   }, [cells]);
 
   // Mouse wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault();
     const isPinch = e.ctrlKey;
     const delta = isPinch ? -e.deltaY * 0.01 : -e.deltaY * 0.002;
     const newZoom = Math.max(0.05, Math.min(10, zoom * (1 + delta)));
     setZoom(newZoom);
   }, [zoom, setZoom]);
+
+  // Attach wheel listener with { passive: false } to prevent console warnings
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, [handleWheel]);
 
   // Double-click to zoom to cell
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
@@ -797,7 +809,6 @@ export function NetworkCanvas() {
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
         onDoubleClick={handleDoubleClick}
-        onWheel={handleWheel}
         style={{ touchAction: 'none' }}
       />
     </div>
