@@ -39,6 +39,7 @@ export function NetworkCanvas() {
   const [showConnections, setShowConnections] = useState(true);
   const [interactionMode, setInteractionMode] = useState<'pan' | 'select'>('pan');
   const [isInitialized, setIsInitialized] = useState(false);
+  const panStartRef = useRef<{ x: number; y: number } | null>(null);
 
   // Build list of all connections
   const getAllConnections = useCallback((): Connection[] => {
@@ -145,36 +146,48 @@ export function NetworkCanvas() {
     const functionNodes = layoutNodes.filter(n => n.type === 'function');
     const cellNodes = layoutNodes.filter(n => n.type === 'cell');
 
-    // Draw connections between cells (if enabled)
+    // Draw connections from living circle to each function (if enabled)
     if (showConnections) {
-      const connections = generateFunctionConnections(
-        cells,
-        config.functionLabels,
-        config.functionVisible
-      );
+      const livingNode = cellNodes.find(n => n.cellId === 'living-center');
 
-      connections.forEach(conn => {
-        const fromNode = cellNodes.find(n => n.cellId === conn.fromCellId);
-        const toNode = cellNodes.find(n => n.cellId === conn.toCellId);
+      if (livingNode) {
+        const livingPos = networkToCanvas(livingNode.position, canvas);
 
-        if (fromNode && toNode) {
-          const fromPos = networkToCanvas(fromNode.position, canvas);
-          const toPos = networkToCanvas(toNode.position, canvas);
+        functionNodes.forEach((fnNode) => {
+          // Check if connection should be filtered
+          if (config.connectionFilter !== 'all' && config.connectionFilter !== fnNode.functionType) {
+            return; // Skip if filtered
+          }
+
+          const fnPos = networkToCanvas(fnNode.position, canvas);
+
+          // Calculate line width based on function weight (lineWidth is already in pixels)
+          let lineWidth = config.lineWidth;
+          if (config.lineWidthByWeight && fnNode.functionType) {
+            const weight = config.functionWeights[fnNode.functionType] || 1;
+            lineWidth *= weight;
+          }
+
+          // Apply width jitter if enabled
+          if (config.lineWidthJitter > 0) {
+            const jitter = (Math.random() - 0.5) * config.lineWidthJitter * lineWidth;
+            lineWidth += jitter;
+          }
 
           ctx.strokeStyle = colors.cellBorder;
-          ctx.globalAlpha = 0.2 * conn.strength;
-          ctx.lineWidth = config.lineWidth * sizeScale;
+          ctx.globalAlpha = config.lineOpacity;
+          ctx.lineWidth = lineWidth;
           ctx.setLineDash(getLineDash(config.lineStyle, config.lineWidth));
 
           ctx.beginPath();
-          ctx.moveTo(fromPos.x, fromPos.y);
-          ctx.lineTo(toPos.x, toPos.y);
+          ctx.moveTo(livingPos.x, livingPos.y);
+          ctx.lineTo(fnPos.x, fnPos.y);
           ctx.stroke();
 
           ctx.setLineDash([]);
           ctx.globalAlpha = 1;
-        }
-      });
+        });
+      }
     }
 
     // Draw function nodes
@@ -278,16 +291,49 @@ export function NetworkCanvas() {
     setZoom(newZoom);
   }, [zoom, setZoom]);
 
+  // Handle panning
+  const handleMouseDown = useCallback((e: MouseEvent) => {
+    if (interactionMode !== 'pan') return;
+    if (e.button !== 0) return; // Only left click
+
+    panStartRef.current = { x: e.clientX, y: e.clientY };
+  }, [interactionMode]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (interactionMode !== 'pan' || !panStartRef.current) return;
+
+    const deltaX = e.clientX - panStartRef.current.x;
+    const deltaY = e.clientY - panStartRef.current.y;
+
+    panStartRef.current = { x: e.clientX, y: e.clientY };
+
+    // Update pan position
+    const newPanX = panX + deltaX;
+    const newPanY = panY + deltaY;
+
+    setView(zoom, newPanX, newPanY);
+  }, [interactionMode, panX, panY, zoom, setView]);
+
+  const handleMouseUp = useCallback(() => {
+    panStartRef.current = null;
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
+    canvas.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
       canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [handleWheel]);
+  }, [handleWheel, handleMouseDown, handleMouseMove, handleMouseUp]);
 
   return (
     <div className="w-full h-full flex flex-col bg-canvas overflow-hidden">

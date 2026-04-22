@@ -11,9 +11,10 @@ interface LayoutNode {
 }
 
 /**
- * Creates a function-based layout where:
- * - Function nodes are positioned in a circle
- * - Cells are positioned around their function nodes
+ * Creates a function-based layout (mitosis view) where:
+ * - Central living circle (main cell) at center
+ * - Function nodes positioned in a circle around the center
+ * - All functions connect to the central living circle
  */
 export function generateFunctionBasedLayout(
   cells: Cell[],
@@ -28,7 +29,18 @@ export function generateFunctionBasedLayout(
   const centerX = CANVAS_SCALE / 2;
   const centerY = CANVAS_SCALE / 2;
 
-  // Get unique visible function types from all cells
+  // Add central living circle (represents the main cell/mitosis)
+  const livingRadius = 0.3; // Central circle radius
+  nodes.push({
+    id: 'living-center',
+    type: 'cell',
+    label: 'living',
+    position: { x: centerX, y: centerY },
+    cellId: 'living-center',
+    radius: livingRadius,
+  });
+
+  // Get unique visible function types
   const functionTypesInCells = new Set<FunctionType>();
   cells.forEach((cell) => {
     cell.functions.forEach((fn) => {
@@ -41,9 +53,9 @@ export function generateFunctionBasedLayout(
   const visibleFunctions = Array.from(functionTypesInCells).sort();
   const functionCount = visibleFunctions.length;
 
-  // Position function nodes in a circle around the center
-  const functionRadius = 3; // Distance from center
-  const functionNodeRadius = 0.6;
+  // Position function nodes in a circle around the center living circle
+  const functionRadius = 2.5; // Distance from center
+  const functionNodeRadius = 0.5;
 
   visibleFunctions.forEach((fnType, index) => {
     const angle = (index / functionCount) * Math.PI * 2;
@@ -57,50 +69,6 @@ export function generateFunctionBasedLayout(
       position: { x, y },
       functionType: fnType,
       radius: functionNodeRadius * (functionWeights[fnType] || 1),
-    });
-  });
-
-  // Position cells around their functions
-  const cellsByFunction = new Map<FunctionType, Cell[]>();
-
-  // Group cells by their first/primary function
-  cells.forEach((cell) => {
-    const cellFunctions = cell.functions.filter((fn) => visible[fn.type]);
-    if (cellFunctions.length > 0) {
-      const primaryFn = cellFunctions[0].type;
-      if (!cellsByFunction.has(primaryFn)) {
-        cellsByFunction.set(primaryFn, []);
-      }
-      cellsByFunction.get(primaryFn)!.push(cell);
-    }
-  });
-
-  // Position cells around their function nodes
-  const cellNodeRadius = 0.4;
-  const cellCircleRadius = 1.2;
-
-  visibleFunctions.forEach((fnType) => {
-    const cellsForFunction = cellsByFunction.get(fnType) || [];
-    const functionIndex = visibleFunctions.indexOf(fnType);
-    const functionAngle = (functionIndex / functionCount) * Math.PI * 2;
-    const functionX = centerX + functionRadius * Math.cos(functionAngle);
-    const functionY = centerY + functionRadius * Math.sin(functionAngle);
-
-    cellsForFunction.forEach((cell, cellIndex) => {
-      const cellAngle =
-        functionAngle +
-        (cellIndex / Math.max(cellsForFunction.length, 1)) * (Math.PI / 3);
-      const cellX = functionX + cellCircleRadius * Math.cos(cellAngle);
-      const cellY = functionY + cellCircleRadius * Math.sin(cellAngle);
-
-      nodes.push({
-        id: cell.id,
-        type: 'cell',
-        label: cell.label,
-        position: { x: cellX, y: cellY },
-        cellId: cell.id,
-        radius: cellNodeRadius,
-      });
     });
   });
 
