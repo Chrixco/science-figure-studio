@@ -1058,17 +1058,11 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
   // TAB CONTENT
   // ============================================================================
 
-  const renderLayoutTab = () => (
+  // Note: CameraControls is now rendered directly in the Layout tab (above the sub-navbar)
+  // This function is kept for reference but is not currently used
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _renderLayoutTabLegacy = () => (
     <div className="space-y-3">
-      {/* Global Camera Controls - Available for both visualizations */}
-      <CameraControls
-        title="View Controls"
-        showPanControls={true}
-        showZoomControls={true}
-        showResetControls={true}
-        panStep={30}
-      />
-
       <div className="text-xs font-semibold text-accent-cyan uppercase tracking-wider px-2 py-1">Mitosis Controls</div>
       {/* Quick Actions */}
       <div className="flex gap-2">
@@ -3209,6 +3203,17 @@ export function ControlPanel({ onSetGraphMode }: ControlPanelProps = {}) {
       <div className="flex-1 flex flex-col overflow-hidden" style={{ scrollbarGutter: 'stable', width: '320px' }}>
         {activeTab === 'layout' && (
           <>
+            {/* Global Camera Controls - Always visible in Layout tab */}
+            <div className="flex-shrink-0 px-3 py-2 border-b border-gray-800 bg-gray-900/50 pointer-events-auto">
+              <CameraControls
+                title="View Controls"
+                showPanControls={true}
+                showZoomControls={true}
+                showResetControls={true}
+                panStep={30}
+              />
+            </div>
+
             {/* Sub-navbar for Layout options */}
             <div className="flex-shrink-0 px-2 py-2 border-b border-gray-800 bg-gray-900/50 pointer-events-auto">
               <div className="flex gap-1">
