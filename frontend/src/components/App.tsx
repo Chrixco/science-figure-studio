@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NetworkCanvas } from './NetworkCanvas';
 import { NetworkCanvas3D } from './NetworkCanvas3D';
 import { BaubleCanvas } from './BaubleCanvas';
+import { CellularCanvas } from './CellularCanvas';
 import { ControlPanel } from './ControlPanel';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { useBaubleStore } from '../hooks/useBaubleStore';
@@ -78,8 +79,10 @@ export function App() {
 
       {/* Main Canvas Area */}
       <main className="flex-1 h-full">
-        {appMode === 'graph' || appMode === 'cellular' ? (
+        {appMode === 'graph' ? (
           <BaubleCanvas />
+        ) : appMode === 'cellular' ? (
+          <CellularCanvas />
         ) : renderMode === '3d' ? (
           <NetworkCanvas3D cells={cells} config={config} colors={colors} />
         ) : (
