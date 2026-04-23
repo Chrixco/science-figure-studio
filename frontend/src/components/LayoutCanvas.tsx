@@ -251,12 +251,15 @@ export function LayoutCanvas() {
             {layoutNodes.map((node) => {
               const screenPos = networkToScreen(node.position);
               const isSelected = node.cellId && selectedCellIds.includes(node.cellId);
+              const radius = node.type === 'cell'
+                ? node.radius * NETWORK_TO_SCREEN * zoom
+                : Math.max(3, node.radius * NETWORK_TO_SCREEN * zoom);
 
               if (node.type === 'cell') {
                 const cellLabel = cells.find(c => c.id === node.cellId)?.label || config.livingLabel;
                 return (
                   <React.Fragment key={node.id}>
-                    {/* Bounding circle for cell */}
+                    {/* Bounding circle for cell (spacing visualization) */}
                     {config.avoidOverlap && (
                       <Circle
                         x={screenPos.x}
@@ -264,53 +267,57 @@ export function LayoutCanvas() {
                         radius={(node.boundingRadius || 1.2) * NETWORK_TO_SCREEN * zoom}
                         fill="transparent"
                         stroke={colors.cellBorder || '#666666'}
-                        strokeWidth={config.cellOutlineWidth * zoom}
-                        dash={config.cellOutlineStyle === 'dashed' ? [3, 3] : config.cellOutlineStyle === 'dotted' ? [1, 1] : undefined}
+                        strokeWidth={Math.max(1, config.cellOutlineWidth * zoom)}
+                        dash={config.cellOutlineStyle === 'dashed' ? [5, 5] : config.cellOutlineStyle === 'dotted' ? [3, 3] : undefined}
                       />
                     )}
+
                     {/* Living circle */}
                     <Circle
                       x={screenPos.x}
                       y={screenPos.y}
-                      radius={node.radius * NETWORK_TO_SCREEN * zoom}
+                      radius={radius}
                       fill={colors.living || '#00ff00'}
-                      opacity={0.7}
                       stroke={isSelected ? colors.text || '#ffffff' : colors.livingOutline || '#00cc00'}
-                      strokeWidth={isSelected ? 3 * zoom : config.livingOutlineWidth * zoom}
+                      strokeWidth={Math.max(1, (isSelected ? 3 : config.livingOutlineWidth) * zoom)}
                     />
+
                     {/* Cell label */}
                     <Text
                       x={screenPos.x}
-                      y={screenPos.y - (node.radius * NETWORK_TO_SCREEN * zoom) - 15 * zoom}
+                      y={screenPos.y + radius + 8 * zoom}
                       text={cellLabel}
-                      fontSize={config.livingFontSize * zoom}
+                      fontSize={Math.max(10, config.livingFontSize * zoom)}
                       fill={colors.livingText || '#ffffff'}
                       align="center"
-                      width={0}
+                      verticalAlign="top"
+                      offsetX={0}
                     />
                   </React.Fragment>
                 );
               } else {
                 return (
                   <React.Fragment key={node.id}>
+                    {/* Function circle with outline */}
                     <Circle
                       x={screenPos.x}
                       y={screenPos.y}
-                      radius={Math.max(2, node.radius * NETWORK_TO_SCREEN * zoom)}
-                      fill={colors.functions[node.functionType!] || '#0088ff'}
+                      radius={radius}
+                      fill={colors.functionBackground[node.functionType!] || colors.functions[node.functionType!] || '#0088ff'}
                       stroke={colors.functions[node.functionType!] || '#0088ff'}
-                      strokeWidth={config.functionOutlineWidth * zoom}
-                      opacity={0.7}
+                      strokeWidth={Math.max(1, config.functionOutlineWidth * zoom)}
                     />
+
                     {/* Function label */}
                     <Text
                       x={screenPos.x}
-                      y={screenPos.y - (node.radius * NETWORK_TO_SCREEN * zoom) - 8 * zoom}
+                      y={screenPos.y + radius + 5 * zoom}
                       text={node.label}
-                      fontSize={Math.max(8, config.functionFontSize * zoom)}
+                      fontSize={Math.max(9, config.functionFontSize * zoom)}
                       fill={colors.functionText[node.functionType!] || '#ffffff'}
                       align="center"
-                      width={0}
+                      verticalAlign="top"
+                      offsetX={0}
                     />
                   </React.Fragment>
                 );
