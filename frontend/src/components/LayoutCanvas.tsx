@@ -1,12 +1,13 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Stage, Layer, Circle } from 'react-konva';
+import { Stage, Layer, Circle, Line, Text } from 'react-konva';
 import { useNetworkStore } from '../hooks/useNetworkStore';
-import { generateFunctionBasedLayout } from '../utils/functionBasedLayout';
+import { generateFunctionBasedLayout, generateFunctionConnections } from '../utils/functionBasedLayout';
 import { Point } from '../types';
 import Konva from 'konva';
 
 const CANVAS_SCALE = 10;
 const NETWORK_TO_SCREEN = 60; // pixels per network unit
+const CELL_SELECT_RADIUS = 0.4; // Network units for cell selection radius
 
 export function LayoutCanvas() {
   const {
@@ -105,12 +106,15 @@ export function LayoutCanvas() {
       for (const cell of cells) {
         const dx = pos.x - cell.position.x;
         const dy = pos.y - cell.position.y;
-        if (Math.sqrt(dx * dx + dy * dy) < 0.4) return cell.id;
+        if (Math.sqrt(dx * dx + dy * dy) < CELL_SELECT_RADIUS) return cell.id;
       }
       return null;
     },
     [cells]
   );
+
+  // Generate connections between cells
+  const connections = generateFunctionConnections(cells, config.functionLabels, config.functionVisible);
 
   const handleMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -222,22 +226,67 @@ export function LayoutCanvas() {
           style={{ cursor: isPanning ? 'grab' : isDragging ? 'grabbing' : 'default' }}
         >
           <Layer>
+            {/* Draw connections between cells */}
+            {config.showExternalConnections && connections.map((conn) => {
+              const cell1 = cells.find(c => c.id === conn.fromCellId);
+              const cell2 = cells.find(c => c.id === conn.toCellId);
+              if (!cell1 || !cell2) return null;
+
+              const pos1 = networkToScreen(cell1.position);
+              const pos2 = networkToScreen(cell2.position);
+
+              return (
+                <Line
+                  key={`connection-${conn.fromCellId}-${conn.toCellId}`}
+                  points={[pos1.x, pos1.y, pos2.x, pos2.y]}
+                  stroke={colors.grid || '#444444'}
+                  strokeWidth={config.lineWidth * zoom}
+                  opacity={config.lineOpacity}
+                  dash={config.lineStyle === 'dashed' ? [5, 5] : config.lineStyle === 'dotted' ? [2, 2] : undefined}
+                />
+              );
+            })}
+
             {/* Draw cells and functions */}
             {layoutNodes.map((node) => {
               const screenPos = networkToScreen(node.position);
               const isSelected = node.cellId && selectedCellIds.includes(node.cellId);
 
               if (node.type === 'cell') {
+                const cellLabel = cells.find(c => c.id === node.cellId)?.label || config.livingLabel;
                 return (
                   <React.Fragment key={node.id}>
+                    {/* Bounding circle for cell */}
+                    {config.avoidOverlap && (
+                      <Circle
+                        x={screenPos.x}
+                        y={screenPos.y}
+                        radius={(node.boundingRadius || 1.2) * NETWORK_TO_SCREEN * zoom}
+                        fill="transparent"
+                        stroke={colors.cellBorder || '#666666'}
+                        strokeWidth={config.cellOutlineWidth * zoom}
+                        dash={config.cellOutlineStyle === 'dashed' ? [3, 3] : config.cellOutlineStyle === 'dotted' ? [1, 1] : undefined}
+                      />
+                    )}
+                    {/* Living circle */}
                     <Circle
                       x={screenPos.x}
                       y={screenPos.y}
                       radius={node.radius * NETWORK_TO_SCREEN * zoom}
                       fill={colors.living || '#00ff00'}
                       opacity={0.7}
-                      stroke={isSelected ? '#00ffff' : 'transparent'}
-                      strokeWidth={isSelected ? 2 : 0}
+                      stroke={isSelected ? colors.text || '#ffffff' : colors.livingOutline || '#00cc00'}
+                      strokeWidth={isSelected ? 3 * zoom : config.livingOutlineWidth * zoom}
+                    />
+                    {/* Cell label */}
+                    <Text
+                      x={screenPos.x}
+                      y={screenPos.y - (node.radius * NETWORK_TO_SCREEN * zoom) - 15 * zoom}
+                      text={cellLabel}
+                      fontSize={config.livingFontSize * zoom}
+                      fill={colors.livingText || '#ffffff'}
+                      align="center"
+                      width={0}
                     />
                   </React.Fragment>
                 );
@@ -249,7 +298,19 @@ export function LayoutCanvas() {
                       y={screenPos.y}
                       radius={Math.max(2, node.radius * NETWORK_TO_SCREEN * zoom)}
                       fill={colors.functions[node.functionType!] || '#0088ff'}
-                      opacity={0.6}
+                      stroke={colors.functions[node.functionType!] || '#0088ff'}
+                      strokeWidth={config.functionOutlineWidth * zoom}
+                      opacity={0.7}
+                    />
+                    {/* Function label */}
+                    <Text
+                      x={screenPos.x}
+                      y={screenPos.y - (node.radius * NETWORK_TO_SCREEN * zoom) - 8 * zoom}
+                      text={node.label}
+                      fontSize={Math.max(8, config.functionFontSize * zoom)}
+                      fill={colors.functionText[node.functionType!] || '#ffffff'}
+                      align="center"
+                      width={0}
                     />
                   </React.Fragment>
                 );
