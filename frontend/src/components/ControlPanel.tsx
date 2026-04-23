@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { useBaubleStore } from '../hooks/useBaubleStore';
 import { useCameraStore } from '../hooks/useCameraStore';
+import { useViewState } from '../hooks/useViewState';
 import { FUNCTION_TYPES, FUNCTION_LABELS, FunctionType, LayoutTemplate, LineStyle } from '../types';
 import { LoadedBaubleFile } from '../types/bauble';
 import { exportToPNG, exportToPDF, exportToSVG, exportToJSON, downloadFile, createShareableURL, exportToGIF } from '../utils/export';
@@ -804,6 +805,110 @@ function CameraControls({
   );
 }
 
+// Layout-specific camera controls (uses useViewState instead of useCameraStore)
+function LayoutCameraControls({
+  title = 'View Controls',
+  showPanControls = true,
+  showZoomControls = true,
+  showResetControls = true,
+  panStep = 30,
+}: CameraControlsProps) {
+  const {
+    zoom,
+    panX,
+    panY,
+    zoomIn,
+    zoomOut,
+    setView,
+  } = useViewState();
+
+  const handlePan = (deltaX: number, deltaY: number) => {
+    setView(zoom, panX + deltaX, panY + deltaY);
+  };
+
+  const handleZoom = (factor: number) => {
+    const newZoom = zoom * factor;
+    setView(newZoom, panX, panY);
+  };
+
+  const handleReset = () => {
+    setView(1, 0, 0);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="text-xs font-semibold text-accent-cyan uppercase tracking-wider px-2 py-1">
+        {title}
+      </div>
+
+      {/* Zoom Controls */}
+      {showZoomControls && (
+        <div className="space-y-2">
+          <div className="flex gap-1.5">
+            <IconButton
+              icon={Icons.zoomOut}
+              onClick={() => handleZoom(0.8)}
+              title="Zoom Out (smaller view)"
+            />
+            <div className="flex-1 flex items-center justify-center px-2 py-2 bg-gray-800/50 rounded-lg">
+              <span className="text-xs text-gray-400">
+                {(zoom * 100).toFixed(0)}%
+              </span>
+            </div>
+            <IconButton
+              icon={Icons.zoomIn}
+              onClick={() => handleZoom(1.25)}
+              title="Zoom In (larger view)"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Pan Controls */}
+      {showPanControls && (
+        <div className="space-y-2">
+          {/* Up */}
+          <div className="flex justify-center">
+            <IconButton
+              icon={Icons.moveUp}
+              onClick={() => handlePan(0, -panStep)}
+              title="Pan Up"
+            />
+          </div>
+
+          {/* Left, Reset, Right */}
+          <div className="flex gap-1.5">
+            <IconButton
+              icon={Icons.moveLeft}
+              onClick={() => handlePan(-panStep, 0)}
+              title="Pan Left"
+            />
+            {showResetControls && (
+              <Button onClick={handleReset} variant="secondary" className="flex-1">
+                Reset
+              </Button>
+            )}
+            <IconButton
+              icon={Icons.moveRight}
+              onClick={() => handlePan(panStep, 0)}
+              title="Pan Right"
+            />
+          </div>
+
+          {/* Down */}
+          <div className="flex justify-center">
+            <IconButton
+              icon={Icons.moveDown}
+              onClick={() => handlePan(0, panStep)}
+              title="Pan Down"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================================
 // TAB COMPONENTS
 // ============================================================================
@@ -1463,6 +1568,20 @@ export function ControlPanel({ onSetMode }: ControlPanelProps = {}) {
   const renderFunctionsTab = () => (
     <div className="space-y-3">
       <div className="text-xs font-semibold text-accent-cyan uppercase tracking-wider px-2 py-1">Mitosis Functions</div>
+
+      {/* Cell Count Control */}
+      <CollapsibleSection title="Cell Count" defaultOpen>
+        <Slider
+          label="Number of Cells"
+          value={config.cellCount}
+          min={1}
+          max={9}
+          step={1}
+          onChange={(v) => updateCellCount(v)}
+          suffix="cells"
+        />
+      </CollapsibleSection>
+
       {/* Quick Labels */}
       <CollapsibleSection title="Living Circle Label" defaultOpen>
         <input
@@ -3203,9 +3322,9 @@ export function ControlPanel({ onSetMode }: ControlPanelProps = {}) {
       <div className="flex-1 flex flex-col overflow-hidden" style={{ scrollbarGutter: 'stable', width: '320px' }}>
         {activeTab === 'layout' && (
           <>
-            {/* Global Camera Controls - Always visible in Layout tab */}
+            {/* Layout-specific Camera Controls - Always visible in Layout tab */}
             <div className="flex-shrink-0 px-3 py-2 border-b border-gray-800 bg-gray-900/50 pointer-events-auto">
-              <CameraControls
+              <LayoutCameraControls
                 title="View Controls"
                 showPanControls={true}
                 showZoomControls={true}

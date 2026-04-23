@@ -8,13 +8,14 @@ interface LayoutNode {
   functionType?: FunctionType;
   cellId?: string;
   radius: number;
+  boundingRadius?: number; // Debug: total space needed for this cell
 }
 
 /**
- * Creates a function-based layout (mitosis view) where:
- * - Central living circle (main cell) at center
- * - Function nodes positioned in a circle around the center
- * - All functions connect to the central living circle
+ * Creates a multi-cell layout where:
+ * - Multiple complete cells (living circle + functions) are positioned across canvas
+ * - Each cell has its own living circle with functions around it
+ * - Cells are spaced to avoid overlapping
  */
 export function generateFunctionBasedLayout(
   cells: Cell[],
@@ -26,19 +27,6 @@ export function generateFunctionBasedLayout(
 ): LayoutNode[] {
   const nodes: LayoutNode[] = [];
   const CANVAS_SCALE = 10;
-  const centerX = CANVAS_SCALE / 2;
-  const centerY = CANVAS_SCALE / 2;
-
-  // Add central living circle (represents the main cell/mitosis)
-  const livingRadius = 0.3; // Central circle radius
-  nodes.push({
-    id: 'living-center',
-    type: 'cell',
-    label: 'living',
-    position: { x: centerX, y: centerY },
-    cellId: 'living-center',
-    radius: livingRadius,
-  });
 
   // Get unique visible function types
   const functionTypesInCells = new Set<FunctionType>();
@@ -53,22 +41,82 @@ export function generateFunctionBasedLayout(
   const visibleFunctions = Array.from(functionTypesInCells).sort();
   const functionCount = visibleFunctions.length;
 
-  // Position function nodes in a circle around the center living circle
-  const functionRadius = 2.5; // Distance from center
-  const functionNodeRadius = 0.5;
+  // Cell layout parameters
+  const functionRadius = 2.5; // Distance from cell center to function nodes
+  const livingRadius = 0.3; // Central living circle radius
+  const functionNodeRadius = 0.5; // Function node radius
+  const boundingRadius = functionRadius + functionNodeRadius + 0.2; // Total bounding circle radius
+  const cellSpacing = boundingRadius * 2 + 0.8; // Space between cell centers (with buffer)
 
-  visibleFunctions.forEach((fnType, index) => {
-    const angle = (index / functionCount) * Math.PI * 2;
-    const x = centerX + functionRadius * Math.cos(angle);
-    const y = centerY + functionRadius * Math.sin(angle);
+  // Position cells in a grid layout with overlap detection
+  const cellCount = cells.length;
+  const cols = Math.ceil(Math.sqrt(cellCount));
+  const rows = Math.ceil(cellCount / cols);
 
+  // Calculate grid positioning to fit within canvas
+  const gridWidth = cols * cellSpacing;
+  const gridHeight = rows * cellSpacing;
+
+  // Dynamically adjust spacing if cells don't fit
+  let adjustedCellSpacing = cellSpacing;
+  if (gridWidth > CANVAS_SCALE || gridHeight > CANVAS_SCALE) {
+    // Shrink spacing to fit all cells
+    adjustedCellSpacing = Math.min(
+      (CANVAS_SCALE - 1) / cols,
+      (CANVAS_SCALE - 1) / rows
+    );
+  }
+
+  const adjustedGridWidth = cols * adjustedCellSpacing;
+  const adjustedGridHeight = rows * adjustedCellSpacing;
+  const startX = (CANVAS_SCALE - adjustedGridWidth) / 2 + adjustedCellSpacing / 2;
+  const startY = (CANVAS_SCALE - adjustedGridHeight) / 2 + adjustedCellSpacing / 2;
+
+  console.log(`Layout: ${cellCount} cells (${cols}x${rows}), spacing=${adjustedCellSpacing.toFixed(2)}, startX=${startX.toFixed(2)}, startY=${startY.toFixed(2)}`);
+
+  // Store cell positions for overlap detection
+  const cellPositions: Array<{ id: string; x: number; y: number; radius: number }> = [];
+
+  // Create nodes for each cell
+  cells.forEach((cell, cellIndex) => {
+    // Calculate cell position in grid
+    const gridRow = Math.floor(cellIndex / cols);
+    const gridCol = cellIndex % cols;
+    const cellCenterX = startX + gridCol * adjustedCellSpacing;
+    const cellCenterY = startY + gridRow * adjustedCellSpacing;
+
+    cellPositions.push({
+      id: cell.id,
+      x: cellCenterX,
+      y: cellCenterY,
+      radius: adjustedCellSpacing / 2, // Use half the spacing as bounding radius
+    });
+
+    // Add living circle (core of the cell)
     nodes.push({
-      id: `function-${fnType}`,
-      type: 'function',
-      label: functionLabels[fnType] || fnType,
-      position: { x, y },
-      functionType: fnType,
-      radius: functionNodeRadius * (functionWeights[fnType] || 1),
+      id: `living-${cell.id}`,
+      type: 'cell',
+      label: cell.label || `Cell ${cellIndex + 1}`,
+      position: { x: cellCenterX, y: cellCenterY },
+      cellId: cell.id,
+      radius: livingRadius,
+      boundingRadius: adjustedCellSpacing / 2, // Debug info - bounding radius for this cell
+    });
+
+    // Add function nodes around this cell
+    visibleFunctions.forEach((fnType, fnIndex) => {
+      const angle = (fnIndex / functionCount) * Math.PI * 2;
+      const fnX = cellCenterX + functionRadius * Math.cos(angle);
+      const fnY = cellCenterY + functionRadius * Math.sin(angle);
+
+      nodes.push({
+        id: `function-${cell.id}-${fnType}`,
+        type: 'function',
+        label: functionLabels[fnType] || fnType,
+        position: { x: fnX, y: fnY },
+        functionType: fnType,
+        radius: 0.5 * (functionWeights[fnType] || 1),
+      });
     });
   });
 
@@ -77,6 +125,7 @@ export function generateFunctionBasedLayout(
 
 /**
  * Calculate connections between cells based on shared functions
+ * (kept for compatibility, but not used in new multi-cell layout)
  */
 export function generateFunctionConnections(
   cells: Cell[],
@@ -87,7 +136,7 @@ export function generateFunctionConnections(
     fromCellId: string;
     toCellId: string;
     sharedFunctions: FunctionType[];
-    strength: number; // 0-1, based on number of shared functions
+    strength: number;
   }
 
   const connections: Connection[] = [];

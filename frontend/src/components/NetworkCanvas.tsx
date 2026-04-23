@@ -32,14 +32,18 @@ export function NetworkCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const drawRef = useRef<(() => void) | null>(null);
-  const { cells, config, colors } = useNetworkStore();
+  const { cells, config, colors, moveCell } = useNetworkStore();
   const { zoom, panX, panY, setZoom, zoomIn, zoomOut, setView } = useViewState();
 
   const [canvasSize, setCanvasSize] = useState(0);
   const [showConnections, setShowConnections] = useState(true);
   const [interactionMode, setInteractionMode] = useState<'pan' | 'select'>('pan');
   const [isInitialized, setIsInitialized] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const [markedCells, setMarkedCells] = useState<Set<string>>(new Set());
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const dragCellStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   // Build list of all connections
   const getAllConnections = useCallback((): Connection[] => {
@@ -146,14 +150,21 @@ export function NetworkCanvas() {
     const functionNodes = layoutNodes.filter(n => n.type === 'function');
     const cellNodes = layoutNodes.filter(n => n.type === 'cell');
 
-    // Draw connections from living circle to each function (if enabled)
+    // Draw connections from each living circle to its functions (if enabled)
     if (showConnections) {
-      const livingNode = cellNodes.find(n => n.cellId === 'living-center');
+      // Get all unique cells
+      const uniqueCells = cells.map(c => c.id);
 
-      if (livingNode) {
+      uniqueCells.forEach((cellId) => {
+        const livingNode = cellNodes.find(n => n.cellId === cellId);
+        if (!livingNode) return;
+
         const livingPos = networkToCanvas(livingNode.position, canvas);
 
-        functionNodes.forEach((fnNode) => {
+        // Find functions for this specific cell
+        const cellFunctions = functionNodes.filter(fn => fn.id.includes(`-${cellId}-`));
+
+        cellFunctions.forEach((fnNode) => {
           // Check if connection should be filtered
           if (config.connectionFilter !== 'all' && config.connectionFilter !== fnNode.functionType) {
             return; // Skip if filtered
@@ -187,7 +198,7 @@ export function NetworkCanvas() {
           ctx.setLineDash([]);
           ctx.globalAlpha = 1;
         });
-      }
+      });
     }
 
     // Draw function nodes
@@ -223,16 +234,17 @@ export function NetworkCanvas() {
     cellNodes.forEach((node) => {
       const center = networkToCanvas(node.position, canvas);
       const radius = node.radius * sizeScale;
+      const isMarked = markedCells.has(node.cellId!);
 
       // Cell background
       ctx.beginPath();
       ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = colors.living;
+      ctx.fillStyle = isMarked ? '#00d9ff' : colors.living; // Cyan highlight for selected
       ctx.fill();
 
-      // Cell border
-      ctx.strokeStyle = colors.livingOutline;
-      ctx.lineWidth = config.livingOutlineWidth;
+      // Cell border - thicker and brighter for selected cells
+      ctx.strokeStyle = isMarked ? '#00ff88' : colors.livingOutline;
+      ctx.lineWidth = isMarked ? config.livingOutlineWidth * 2 : config.livingOutlineWidth;
       ctx.setLineDash(getLineDash(config.livingOutlineStyle, config.livingOutlineWidth));
       ctx.stroke();
       ctx.setLineDash([]);
@@ -244,8 +256,22 @@ export function NetworkCanvas() {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(node.label, center.x, center.y);
+
+      // Debug: Draw bounding circle if debug mode is enabled
+      if (showDebug && node.boundingRadius) {
+        const boundingRadius = node.boundingRadius * sizeScale;
+        ctx.strokeStyle = '#0088ff';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.3;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.arc(center.x, center.y, boundingRadius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
     });
-  }, [cells, colors, config, zoom, panX, panY, showConnections, networkToCanvas]);
+  }, [cells, colors, config, zoom, panX, panY, showConnections, showDebug, markedCells, networkToCanvas]);
 
   // Update the draw ref whenever draw changes
   useEffect(() => {
@@ -291,31 +317,112 @@ export function NetworkCanvas() {
     setZoom(newZoom);
   }, [zoom, setZoom]);
 
-  // Handle panning
+  // Handle panning and cell selection/dragging
   const handleMouseDown = useCallback((e: MouseEvent) => {
-    if (interactionMode !== 'pan') return;
     if (e.button !== 0) return; // Only left click
 
-    panStartRef.current = { x: e.clientX, y: e.clientY };
-  }, [interactionMode]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = e.clientX - rect.left;
+    const canvasY = e.clientY - rect.top;
+
+    if (interactionMode === 'pan') {
+      panStartRef.current = { x: e.clientX, y: e.clientY };
+    } else if (interactionMode === 'select') {
+      // Find which cell was clicked
+      const layoutNodes = generateFunctionBasedLayout(cells, canvas.width, canvas.height, config.functionLabels, config.functionWeights, config.functionVisible);
+      const cellNodes = layoutNodes.filter(n => n.type === 'cell');
+      const sizeScale = (canvas.width / CANVAS_SCALE) * zoom;
+
+      let clickedCellId: string | null = null;
+
+      for (const cellNode of cellNodes) {
+        const center = networkToCanvas(cellNode.position, canvas);
+        const radius = cellNode.radius * sizeScale;
+        const dist = Math.sqrt((canvasX - center.x) ** 2 + (canvasY - center.y) ** 2);
+
+        if (dist <= radius) {
+          clickedCellId = cellNode.cellId!;
+          break;
+        }
+      }
+
+      if (clickedCellId) {
+        // Toggle selection with Ctrl/Cmd, or select single
+        let newMarked = new Set(markedCells);
+        if (e.ctrlKey || e.metaKey) {
+          if (newMarked.has(clickedCellId)) {
+            newMarked.delete(clickedCellId);
+          } else {
+            newMarked.add(clickedCellId);
+          }
+        } else if (!newMarked.has(clickedCellId)) {
+          newMarked = new Set([clickedCellId]);
+        }
+
+        setMarkedCells(newMarked);
+
+        // Start dragging - use newMarked (the updated set) instead of state
+        dragStartRef.current = { x: e.clientX, y: e.clientY };
+        dragCellStartRef.current = new Map();
+
+        newMarked.forEach(cellId => {
+          const cell = cells.find(c => c.id === cellId);
+          if (cell) {
+            dragCellStartRef.current!.set(cellId, { x: cell.position.x, y: cell.position.y });
+          }
+        });
+      } else {
+        // Clicked on empty space - deselect
+        setMarkedCells(new Set());
+      }
+    }
+  }, [interactionMode, cells, config, markedCells, networkToCanvas, zoom]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (interactionMode !== 'pan' || !panStartRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const deltaX = e.clientX - panStartRef.current.x;
-    const deltaY = e.clientY - panStartRef.current.y;
+    if (interactionMode === 'pan' && panStartRef.current) {
+      const deltaX = e.clientX - panStartRef.current.x;
+      const deltaY = e.clientY - panStartRef.current.y;
 
-    panStartRef.current = { x: e.clientX, y: e.clientY };
+      panStartRef.current = { x: e.clientX, y: e.clientY };
 
-    // Update pan position
-    const newPanX = panX + deltaX;
-    const newPanY = panY + deltaY;
+      const newPanX = panX + deltaX;
+      const newPanY = panY + deltaY;
 
-    setView(zoom, newPanX, newPanY);
-  }, [interactionMode, panX, panY, zoom, setView]);
+      setView(zoom, newPanX, newPanY);
+    } else if (interactionMode === 'select' && dragStartRef.current && dragCellStartRef.current.size > 0) {
+      // Drag marked cells
+      const rect = canvas.getBoundingClientRect();
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+
+      // Calculate delta in network coordinates
+      const deltaPixelX = e.clientX - dragStartRef.current.x;
+      const deltaPixelY = e.clientY - dragStartRef.current.y;
+
+      const deltaNetworkX = (deltaPixelX / zoom) / (canvas.width / CANVAS_SCALE);
+      const deltaNetworkY = (deltaPixelY / zoom) / (canvas.height / CANVAS_SCALE);
+
+      // Move all marked cells
+      dragCellStartRef.current.forEach((startPos, cellId) => {
+        const newX = Math.max(0.5, Math.min(CANVAS_SCALE - 0.5, startPos.x + deltaNetworkX));
+        const newY = Math.max(0.5, Math.min(CANVAS_SCALE - 0.5, startPos.y + deltaNetworkY));
+        moveCell(cellId, { x: newX, y: newY });
+      });
+    }
+  }, [interactionMode, panX, panY, zoom, setView, moveCell, dragCellStartRef]);
 
   const handleMouseUp = useCallback(() => {
     panStartRef.current = null;
+    dragStartRef.current = null;
+    dragCellStartRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -402,6 +509,18 @@ export function NetworkCanvas() {
           title="Select Mode"
         >
           ⬜
+        </button>
+        <div className="w-px bg-gray-700" />
+        <button
+          onClick={() => setShowDebug(!showDebug)}
+          className={`px-2 py-1 rounded text-sm transition-colors ${
+            showDebug
+              ? 'text-blue-400 bg-blue-400/10'
+              : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
+          }`}
+          title="Toggle Debug (Show Cell Bounds)"
+        >
+          🐛
         </button>
       </div>
     </div>
