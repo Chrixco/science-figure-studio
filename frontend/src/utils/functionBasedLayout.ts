@@ -79,17 +79,23 @@ export function generateFunctionBasedLayout(
 
   // Create nodes for each cell
   cells.forEach((cell, cellIndex) => {
-    // Calculate cell position in grid
-    const gridRow = Math.floor(cellIndex / cols);
-    const gridCol = cellIndex % cols;
-    const cellCenterX = startX + gridCol * adjustedCellSpacing;
-    const cellCenterY = startY + gridRow * adjustedCellSpacing;
+    // Use cell position from store, or calculate grid position if not set
+    let cellCenterX = cell.position.x;
+    let cellCenterY = cell.position.y;
+
+    // If cell position is at origin (not initialized), use grid layout for initial positioning
+    if (cellCenterX === 0 && cellCenterY === 0) {
+      const gridRow = Math.floor(cellIndex / cols);
+      const gridCol = cellIndex % cols;
+      cellCenterX = startX + gridCol * adjustedCellSpacing;
+      cellCenterY = startY + gridRow * adjustedCellSpacing;
+    }
 
     cellPositions.push({
       id: cell.id,
       x: cellCenterX,
       y: cellCenterY,
-      radius: adjustedCellSpacing / 2, // Use half the spacing as bounding radius
+      radius: boundingRadius, // Use the calculated bounding radius
     });
 
     // Add living circle (core of the cell)
@@ -100,7 +106,7 @@ export function generateFunctionBasedLayout(
       position: { x: cellCenterX, y: cellCenterY },
       cellId: cell.id,
       radius: livingRadius,
-      boundingRadius: adjustedCellSpacing / 2, // Debug info - bounding radius for this cell
+      boundingRadius,
     });
 
     // Add function nodes around this cell

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { NetworkCanvas } from './NetworkCanvas';
-import { NetworkCanvas3D } from './NetworkCanvas3D';
 import { BaubleCanvas } from './BaubleCanvas';
+import { LayoutCanvas } from './LayoutCanvas';
 import { ControlPanel } from './ControlPanel';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { useBaubleStore } from '../hooks/useBaubleStore';
@@ -11,7 +10,7 @@ import { loadDefaultBaubleFiles } from '../utils/loadDefaultBaubleFiles';
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [appMode, setAppMode] = useState<'mitosis' | 'graph'>('mitosis');
-  const { loadState, renderMode, cells, config, colors } = useNetworkStore();
+  const { loadState } = useNetworkStore();
   const { addFile } = useBaubleStore();
 
   // Load from URL on mount
@@ -77,13 +76,11 @@ export function App() {
       )}
 
       {/* Main Canvas Area */}
-      <main className="flex-1 h-full">
+      <main className="flex-1 h-full bg-canvas-dark flex flex-col">
         {appMode === 'graph' ? (
           <BaubleCanvas />
-        ) : renderMode === '3d' ? (
-          <NetworkCanvas3D cells={cells} config={config} colors={colors} />
         ) : (
-          <NetworkCanvas />
+          <LayoutCanvas />
         )}
       </main>
     </div>
