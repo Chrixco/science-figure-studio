@@ -39,11 +39,9 @@ export function LayoutCanvas() {
   useEffect(() => {
     const updateSize = () => {
       if (containerRef.current) {
-        const { clientWidth, clientHeight } = containerRef.current;
-        console.log('Updating container size:', { clientWidth, clientHeight });
         setContainerSize({
-          width: clientWidth,
-          height: clientHeight,
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
         });
       }
     };
@@ -74,15 +72,6 @@ export function LayoutCanvas() {
     config.functionVisible
   );
 
-  // Debug: Log container size on mount and changes
-  useEffect(() => {
-    console.log('Container size updated:', containerSize);
-  }, [containerSize]);
-
-  // Debug: Log pan changes
-  useEffect(() => {
-    console.log('Pan values changed:', { panX, panY, zoom });
-  }, [panX, panY, zoom]);
 
   // Convert network coordinates to screen coordinates
   const networkToScreen = useCallback(
@@ -156,26 +145,8 @@ export function LayoutCanvas() {
       if (isPanning && panStartRef.current) {
         const deltaX = e.evt.clientX - panStartRef.current.x;
         const deltaY = e.evt.clientY - panStartRef.current.y;
-        console.log('Pan move:', {
-          deltaX,
-          deltaY,
-          eventClientX: e.evt.clientX,
-          eventClientY: e.evt.clientY,
-          startX: panStartRef.current.x,
-          startY: panStartRef.current.y,
-          newPanX: panX + deltaX,
-          newPanY: panY + deltaY
-        });
-        setPanX((prev) => {
-          const newVal = prev + deltaX;
-          console.log('setPanX:', { prev, deltaX, newVal });
-          return newVal;
-        });
-        setPanY((prev) => {
-          const newVal = prev + deltaY;
-          console.log('setPanY:', { prev, deltaY, newVal });
-          return newVal;
-        });
+        setPanX((prev) => prev + deltaX);
+        setPanY((prev) => prev + deltaY);
         panStartRef.current = { x: e.evt.clientX, y: e.evt.clientY };
         return;
       }
