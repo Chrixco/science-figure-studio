@@ -282,17 +282,34 @@ export function LayoutCanvas() {
                       strokeWidth={Math.max(1, (isSelected ? 3 : config.livingOutlineWidth) * zoom)}
                     />
 
-                    {/* Cell label */}
-                    <Text
-                      x={screenPos.x}
-                      y={screenPos.y + radius + 8 * zoom}
-                      text={cellLabel}
-                      fontSize={Math.max(10, config.livingFontSize * zoom)}
-                      fill={colors.livingText || '#ffffff'}
-                      align="center"
-                      verticalAlign="top"
-                      offsetX={0}
-                    />
+                    {/* Cell label inside circle */}
+                    {radius > 15 && (
+                      <Text
+                        x={screenPos.x}
+                        y={screenPos.y}
+                        text={cellLabel}
+                        fontSize={Math.max(10, config.livingFontSize * zoom)}
+                        fill={colors.livingText || '#ffffff'}
+                        align="center"
+                        verticalAlign="middle"
+                        offsetX={0}
+                        offsetY={0}
+                      />
+                    )}
+
+                    {/* Cell label below circle (always visible) */}
+                    {radius <= 15 && (
+                      <Text
+                        x={screenPos.x}
+                        y={screenPos.y + radius + 8 * zoom}
+                        text={cellLabel}
+                        fontSize={Math.max(10, config.livingFontSize * zoom)}
+                        fill={colors.livingText || '#ffffff'}
+                        align="center"
+                        verticalAlign="top"
+                        offsetX={0}
+                      />
+                    )}
                   </React.Fragment>
                 );
               } else {
@@ -308,17 +325,34 @@ export function LayoutCanvas() {
                       strokeWidth={Math.max(1, config.functionOutlineWidth * zoom)}
                     />
 
-                    {/* Function label */}
-                    <Text
-                      x={screenPos.x}
-                      y={screenPos.y + radius + 5 * zoom}
-                      text={node.label}
-                      fontSize={Math.max(9, config.functionFontSize * zoom)}
-                      fill={colors.functionText[node.functionType!] || '#ffffff'}
-                      align="center"
-                      verticalAlign="top"
-                      offsetX={0}
-                    />
+                    {/* Function label inside circle */}
+                    {radius > 12 && (
+                      <Text
+                        x={screenPos.x}
+                        y={screenPos.y}
+                        text={node.label}
+                        fontSize={Math.max(8, config.functionFontSize * zoom)}
+                        fill={colors.functionText[node.functionType!] || '#ffffff'}
+                        align="center"
+                        verticalAlign="middle"
+                        offsetX={0}
+                        offsetY={0}
+                      />
+                    )}
+
+                    {/* Function label below circle (when too small to fit inside) */}
+                    {radius <= 12 && (
+                      <Text
+                        x={screenPos.x}
+                        y={screenPos.y + radius + 4 * zoom}
+                        text={node.label}
+                        fontSize={Math.max(8, config.functionFontSize * zoom)}
+                        fill={colors.functionText[node.functionType!] || '#ffffff'}
+                        align="center"
+                        verticalAlign="top"
+                        offsetX={0}
+                      />
+                    )}
                   </React.Fragment>
                 );
               }
