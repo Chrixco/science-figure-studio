@@ -24,7 +24,7 @@ export function LayoutCanvas() {
     saveToHistory,
   } = useNetworkStore();
 
-  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState(1);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
@@ -35,21 +35,34 @@ export function LayoutCanvas() {
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
 
-  // Handle container resize
+  // Track container size changes
   useEffect(() => {
-    const handleResize = () => {
+    const updateSize = () => {
       if (containerRef.current) {
+        const { clientWidth, clientHeight } = containerRef.current;
+        console.log('Updating container size:', { clientWidth, clientHeight });
         setContainerSize({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
+          width: clientWidth,
+          height: clientHeight,
         });
       }
     };
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    // Update on mount with a small delay to ensure DOM is laid out
+    const timeoutId = setTimeout(updateSize, 100);
+
+    // Use ResizeObserver for better resize tracking
+    const resizeObserver = new ResizeObserver(updateSize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      clearTimeout(timeoutId);
+      resizeObserver.disconnect();
+    };
   }, []);
+
 
   // Generate layout nodes from cells
   const layoutNodes = generateFunctionBasedLayout(
@@ -61,16 +74,21 @@ export function LayoutCanvas() {
     config.functionVisible
   );
 
-  // Debug: Log when component mounts and cell data updates
+  // Debug: Log container size on mount and changes
   useEffect(() => {
-    console.log('LayoutCanvas rendered:', { cellCount: cells.length, layoutNodeCount: layoutNodes.length });
-  }, [cells.length, layoutNodes.length]);
+    console.log('Container size updated:', containerSize);
+  }, [containerSize]);
+
+  // Debug: Log pan changes
+  useEffect(() => {
+    console.log('Pan values changed:', { panX, panY, zoom });
+  }, [panX, panY, zoom]);
 
   // Convert network coordinates to screen coordinates
   const networkToScreen = useCallback(
     (pos: Point): Point => {
-      const centerX = containerSize.width / 2;
-      const centerY = containerSize.height / 2;
+      const centerX = (containerSize.width || 800) / 2;
+      const centerY = (containerSize.height || 600) / 2;
       return {
         x: pos.x * NETWORK_TO_SCREEN * zoom + panX + centerX,
         y: pos.y * NETWORK_TO_SCREEN * zoom + panY + centerY,
@@ -82,8 +100,8 @@ export function LayoutCanvas() {
   // Convert screen coordinates to network coordinates
   const screenToNetwork = useCallback(
     (screenX: number, screenY: number): Point => {
-      const centerX = containerSize.width / 2;
-      const centerY = containerSize.height / 2;
+      const centerX = (containerSize.width || 800) / 2;
+      const centerY = (containerSize.height || 600) / 2;
       return {
         x: (screenX - panX - centerX) / (NETWORK_TO_SCREEN * zoom),
         y: (screenY - panY - centerY) / (NETWORK_TO_SCREEN * zoom),
@@ -136,8 +154,28 @@ export function LayoutCanvas() {
   const handleMouseMove = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (isPanning && panStartRef.current) {
-        setPanX((prev) => prev + e.evt.clientX - panStartRef.current!.x);
-        setPanY((prev) => prev + e.evt.clientY - panStartRef.current!.y);
+        const deltaX = e.evt.clientX - panStartRef.current.x;
+        const deltaY = e.evt.clientY - panStartRef.current.y;
+        console.log('Pan move:', {
+          deltaX,
+          deltaY,
+          eventClientX: e.evt.clientX,
+          eventClientY: e.evt.clientY,
+          startX: panStartRef.current.x,
+          startY: panStartRef.current.y,
+          newPanX: panX + deltaX,
+          newPanY: panY + deltaY
+        });
+        setPanX((prev) => {
+          const newVal = prev + deltaX;
+          console.log('setPanX:', { prev, deltaX, newVal });
+          return newVal;
+        });
+        setPanY((prev) => {
+          const newVal = prev + deltaY;
+          console.log('setPanY:', { prev, deltaY, newVal });
+          return newVal;
+        });
         panStartRef.current = { x: e.evt.clientX, y: e.evt.clientY };
         return;
       }
@@ -184,10 +222,12 @@ export function LayoutCanvas() {
       const rect = container.getBoundingClientRect();
       const mouseX = e.evt.clientX - rect.left;
       const mouseY = e.evt.clientY - rect.top;
+      const centerX = (containerSize.width || 800) / 2;
+      const centerY = (containerSize.height || 600) / 2;
 
       // Zoom at cursor
-      setPanX((prev) => (mouseX - containerSize.width / 2) * (1 - scale) + scale * prev);
-      setPanY((prev) => (mouseY - containerSize.height / 2) * (1 - scale) + scale * prev);
+      setPanX((prev) => (mouseX - centerX) * (1 - scale) + scale * prev);
+      setPanY((prev) => (mouseY - centerY) * (1 - scale) + scale * prev);
       setZoom(newZoom);
     },
     [zoom, containerSize]
@@ -201,8 +241,8 @@ export function LayoutCanvas() {
       >
         <Stage
           ref={stageRef}
-          width={containerSize.width}
-          height={containerSize.height}
+          width={containerSize.width || 800}
+          height={containerSize.height || 600}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
