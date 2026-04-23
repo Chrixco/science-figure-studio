@@ -82,6 +82,9 @@ export interface NetworkConfig {
   lineOverlapOpacity: number; // Opacity for lines overlapping circles (0-1)
   livingFontSize: number;
   functionFontSize: number;
+  textPosition: 'inside' | 'above' | 'below' | 'outside'; // Where to place text relative to circles
+  textAlignment: 'left' | 'center' | 'right'; // Text alignment
+  textOffset: number; // Distance from circles (pixels)
   livingOutlineWidth: number;
   livingOutlineStyle: LineStyle;
   functionOutlineWidth: number;
@@ -179,6 +182,9 @@ export const DEFAULT_CONFIG: NetworkConfig = {
   lineOverlapOpacity: 0.25,
   livingFontSize: 12,
   functionFontSize: 9,
+  textPosition: 'inside',
+  textAlignment: 'center',
+  textOffset: 8,
   livingOutlineWidth: 3,
   livingOutlineStyle: 'solid',
   functionOutlineWidth: 2,

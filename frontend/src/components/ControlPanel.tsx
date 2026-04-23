@@ -1484,6 +1484,59 @@ export function ControlPanel({ onSetMode }: ControlPanelProps = {}) {
         </div>
       </CollapsibleSection>
 
+      {/* Text Positioning & Alignment */}
+      <CollapsibleSection title="Text Positioning & Alignment">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <span className="text-xs text-gray-400">Text Position</span>
+            <div className="grid grid-cols-2 gap-2">
+              {(['inside', 'above', 'below', 'outside'] as const).map((pos) => (
+                <button
+                  key={pos}
+                  onClick={() => setConfig({ textPosition: pos })}
+                  className={`p-2 rounded text-xs font-medium transition-all ${
+                    config.textPosition === pos
+                      ? 'bg-accent-cyan text-gray-900'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-xs text-gray-400">Text Alignment</span>
+            <div className="flex gap-2">
+              {(['left', 'center', 'right'] as const).map((align) => (
+                <button
+                  key={align}
+                  onClick={() => setConfig({ textAlignment: align })}
+                  className={`flex-1 p-2 rounded text-xs font-medium transition-all ${
+                    config.textAlignment === align
+                      ? 'bg-accent-cyan text-gray-900'
+                      : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  }`}
+                >
+                  {align === 'left' ? '⬅' : align === 'center' ? '⬍' : '➡'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Slider
+            label="Text Offset"
+            value={config.textOffset}
+            min={0}
+            max={30}
+            step={1}
+            onChange={(v) => setConfig({ textOffset: v })}
+            suffix="px"
+          />
+        </div>
+      </CollapsibleSection>
+
       {/* Colors */}
       <CollapsibleSection title="Colors" icon={Icons.style}>
         <div className="space-y-3">
