@@ -1,4 +1,4 @@
-import * as XLSX from 'xlsx';
+import { readSheetRows, SheetRow } from './excelIO';
 import { Cell, NetworkConfig, FUNCTION_TYPES, DEFAULT_CONFIG } from '../types';
 import { createCell, CANVAS_SCALE } from './geometry';
 
@@ -22,29 +22,15 @@ export async function parseExcelFile(
   const cells: Cell[] = [];
 
   try {
-    // Read file as ArrayBuffer
-    const arrayBuffer = await file.arrayBuffer();
+    const data: SheetRow[] = await readSheetRows(file);
 
-    // Parse workbook
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-
-    // Get first sheet
-    const sheetName = workbook.SheetNames[0];
-    if (!sheetName) {
-      errors.push('No sheets found in Excel file');
-      return { cells, errors };
-    }
-
-    const sheet = workbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet);
-
-    if (!Array.isArray(data) || data.length === 0) {
+    if (data.length === 0) {
       errors.push('No data found in sheet');
       return { cells, errors };
     }
 
     // Check required columns
-    const firstRow = data[0] as Record<string, unknown>;
+    const firstRow = data[0];
     const hasX = 'x' in firstRow;
     const hasY = 'y' in firstRow;
     const hasLabel = 'label' in firstRow;
@@ -63,7 +49,7 @@ export async function parseExcelFile(
 
     // Process each row
     for (let i = 0; i < data.length; i++) {
-      const row = data[i] as Record<string, unknown>;
+      const row = data[i];
       const rowNum = i + 2; // +1 for header, +1 for 1-based indexing
 
       // Skip empty rows

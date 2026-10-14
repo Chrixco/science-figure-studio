@@ -53,7 +53,7 @@ export function CellularCanvas() {
     tempCtx.font = `bold ${scaledFontSize}px ${fontFamily}`;
 
     const words = text.split(' ');
-    let lines: string[] = [];
+    const lines: string[] = [];
     let currentLine = '';
     const padding = scaledFontSize * 0.5;
 

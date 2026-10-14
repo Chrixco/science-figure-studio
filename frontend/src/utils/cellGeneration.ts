@@ -34,18 +34,52 @@ export interface PlacementBounds {
 }
 
 /**
- * Calculate bounds accounting for cell size
+ * Fraction of the placement domain that may be occupied by cell exclusion
+ * discs.
+ *
+ * Random sequential placement of equal discs saturates around 0.547 -- beyond
+ * that the sampler rejects far more candidates than it accepts. Sizing the
+ * domain for a comfortable 0.45 keeps placement fast and reliable.
+ */
+const TARGET_PACKING_DENSITY = 0.45;
+
+/**
+ * Calculate bounds for cell placement, sized to actually hold `count` cells.
+ *
+ * This used to return a fixed CANVAS_SCALE box regardless of how many cells
+ * were requested. At default settings that gives a 5.5x5.5 usable area while
+ * each cell needs 4.725 units of separation -- room for two or three cells, not
+ * the six the user asked for. Every layout template then silently returned
+ * short, and the UI reported the requested count regardless.
+ *
+ * The domain now grows with the requested count so the templates can always
+ * place every cell. It never shrinks below CANVAS_SCALE, so small networks look
+ * exactly as they did before.
  */
 export function calculateBounds(
   cellBorderRadius: number,
+  count: number = 1,
+  spacing: number = 0,
   canvasScale: number = CANVAS_SCALE
 ): PlacementBounds {
   const padding = cellBorderRadius;
+
+  // Centre-to-centre pitch each cell demands. With overlap avoidance off,
+  // spacing is 0 and the cell's own footprint is the only constraint.
+  const pitch = Math.max(spacing, cellBorderRadius * 2);
+
+  // Area needed for `count` exclusion discs at the target density, expressed
+  // as the side of a square interior.
+  const discArea = Math.PI * (pitch / 2) ** 2;
+  const interiorSide = Math.sqrt((count * discArea) / TARGET_PACKING_DENSITY);
+
+  const side = Math.max(canvasScale, interiorSide + padding * 2);
+
   return {
     minX: padding,
-    maxX: canvasScale - padding,
+    maxX: side - padding,
     minY: padding,
-    maxY: canvasScale - padding
+    maxY: side - padding
   };
 }
 
@@ -78,32 +112,59 @@ export function generateRandomLayout(
   bounds: PlacementBounds,
   spacing: number
 ): Point[] {
+  // Rejection sampling alone can stall even in a domain sized to fit: a few
+  // unlucky early placements can wall off the remaining room. When that
+  // happens, expand the domain slightly and keep going rather than returning
+  // fewer cells than were asked for.
+  const ATTEMPTS_PER_ROUND = 5000;
+  const MAX_EXPANSIONS = 20;
+  const EXPANSION_FACTOR = 1.15;
+
   const positions: Point[] = [];
-  const maxAttempts = 50000;  // More attempts = better results
-  let consecutiveFailures = 0;
+  let current = bounds;
 
-  while (positions.length < count && consecutiveFailures < maxAttempts) {
-    const candidate: Point = {
-      x: bounds.minX + Math.random() * (bounds.maxX - bounds.minX),
-      y: bounds.minY + Math.random() * (bounds.maxY - bounds.minY)
-    };
+  for (let expansion = 0; expansion <= MAX_EXPANSIONS; expansion++) {
+    let failures = 0;
 
-    // Check collision with existing positions using spacing
-    // IMPORTANT: spacing already includes radius calculations, so we check distance directly
-    const hasCollision = positions.some(p => {
-      const distance = Math.sqrt((candidate.x - p.x) ** 2 + (candidate.y - p.y) ** 2);
-      return distance < spacing;
-    });
+    while (positions.length < count && failures < ATTEMPTS_PER_ROUND) {
+      const candidate: Point = {
+        x: current.minX + Math.random() * (current.maxX - current.minX),
+        y: current.minY + Math.random() * (current.maxY - current.minY)
+      };
 
-    if (!hasCollision) {
-      positions.push(candidate);
-      consecutiveFailures = 0;
-    } else {
-      consecutiveFailures++;
+      // `spacing` is already a centre-to-centre distance, so compare directly.
+      const hasCollision = positions.some(p => {
+        const distance = Math.sqrt((candidate.x - p.x) ** 2 + (candidate.y - p.y) ** 2);
+        return distance < spacing;
+      });
+
+      if (!hasCollision) {
+        positions.push(candidate);
+        failures = 0;
+      } else {
+        failures++;
+      }
     }
+
+    if (positions.length >= count) break;
+    current = expandBounds(current, EXPANSION_FACTOR);
   }
 
   return positions;
+}
+
+/** Grow bounds about their centre, keeping them square. */
+function expandBounds(bounds: PlacementBounds, factor: number): PlacementBounds {
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const halfWidth = ((bounds.maxX - bounds.minX) / 2) * factor;
+  const halfHeight = ((bounds.maxY - bounds.minY) / 2) * factor;
+  return {
+    minX: centerX - halfWidth,
+    maxX: centerX + halfWidth,
+    minY: centerY - halfHeight,
+    maxY: centerY + halfHeight
+  };
 }
 
 /**
@@ -115,53 +176,35 @@ export function generateGridLayout(
   bounds: PlacementBounds,
   spacing: number
 ): Point[] {
+  if (count <= 0) return [];
+
+  // Choose a grid shape for the requested count, then use whichever pitch is
+  // larger: what the bounds allow, or what `spacing` demands. Previously the
+  // column count was derived from the bounds, so a domain too small for the
+  // requested spacing silently dropped the overflow rows.
+  const cols = Math.ceil(Math.sqrt(count));
+  const rows = Math.ceil(count / cols);
+
+  const availableWidth = bounds.maxX - bounds.minX;
+  const availableHeight = bounds.maxY - bounds.minY;
+
+  const pitchX = Math.max(spacing, availableWidth / cols);
+  const pitchY = Math.max(spacing, availableHeight / rows);
+
+  // Centre the grid on the bounds so growing the pitch expands symmetrically.
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const startX = centerX - ((cols - 1) * pitchX) / 2;
+  const startY = centerY - ((rows - 1) * pitchY) / 2;
+
   const positions: Point[] = [];
-
-  if (spacing === 0) {
-    // Simple grid without spacing concerns
-    const cols = Math.ceil(Math.sqrt(count));
-    const rows = Math.ceil(count / cols);
-
-    const cellWidth = (bounds.maxX - bounds.minX) / cols;
-    const cellHeight = (bounds.maxY - bounds.minY) / rows;
-
-    for (let i = 0; i < count; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      positions.push({
-        x: bounds.minX + (col + 0.5) * cellWidth,
-        y: bounds.minY + (row + 0.5) * cellHeight
-      });
-    }
-  } else {
-    // Grid with spacing - adjust grid size to accommodate spacing
-    const availableWidth = bounds.maxX - bounds.minX;
-    const availableHeight = bounds.maxY - bounds.minY;
-
-    // Calculate how many cells can fit with spacing
-    const cols = Math.max(1, Math.floor(availableWidth / spacing));
-    const rows = Math.max(1, Math.ceil(count / cols));
-
-    if (rows * spacing > availableHeight) {
-      console.warn(
-        `Grid layout: Can only fit ${cols * Math.floor(availableHeight / spacing)} cells with spacing ${spacing.toFixed(2)}`
-      );
-    }
-
-    const cellWidth = availableWidth / cols;
-    const cellHeight = availableHeight / rows;
-
-    for (let i = 0; i < count; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-
-      if (row * cellHeight + cellHeight / 2 > bounds.maxY) break;  // Out of bounds
-
-      positions.push({
-        x: bounds.minX + (col + 0.5) * cellWidth,
-        y: bounds.minY + (row + 0.5) * cellHeight
-      });
-    }
+  for (let i = 0; i < count; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    positions.push({
+      x: startX + col * pitchX,
+      y: startY + row * pitchY
+    });
   }
 
   return positions;
@@ -176,25 +219,29 @@ export function generateCircleLayout(
   bounds: PlacementBounds,
   spacing: number
 ): Point[] {
+  if (count <= 0) return [];
+
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
-  const maxRadius = Math.min(
-    bounds.maxX - bounds.minX,
-    bounds.maxY - bounds.minY
-  ) / 2 * 0.8;
+  const boundsRadius =
+    (Math.min(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2) * 0.8;
+
+  // Chord between neighbours on a ring of radius r is 2r*sin(pi/count). Solve
+  // for the r that makes that chord at least `spacing`, and use whichever is
+  // larger -- the ring the bounds suggest, or the ring the spacing requires.
+  // The old version always used the bounds radius and stepped by a fixed angle,
+  // so large counts wrapped past 360 degrees and stacked cells on top of
+  // each other.
+  const requiredRadius =
+    count > 1 && spacing > 0 ? spacing / (2 * Math.sin(Math.PI / count)) : 0;
+  const radius = Math.max(boundsRadius, requiredRadius);
 
   const positions: Point[] = [];
-
-  // Calculate radius needed between points to maintain spacing
-  // For circle packing: arc_length ≥ spacing
-  // arc_length = radius * angle, so angle ≥ spacing / radius
-  const minAngle = spacing > 0 ? Math.atan2(spacing / 2, maxRadius) * 2 : (Math.PI * 2) / count;
-
   for (let i = 0; i < count; i++) {
-    const angle = (i * minAngle) - Math.PI / 2;
+    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
     positions.push({
-      x: centerX + Math.cos(angle) * maxRadius,
-      y: centerY + Math.sin(angle) * maxRadius
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius
     });
   }
 
@@ -210,37 +257,47 @@ export function generateClusterLayout(
   bounds: PlacementBounds,
   spacing: number
 ): Point[] {
+  if (count <= 0) return [];
+
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
-  const maxRadius = Math.min(
-    bounds.maxX - bounds.minX,
-    bounds.maxY - bounds.minY
-  ) / 2 * 0.7;
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5)); // ~137.5 degrees
 
-  const positions: Point[] = [];
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));  // ≈ 137.5°
-
+  // Vogel spiral: r = c*sqrt(i). Build it with a provisional scale, measure the
+  // tightest pair, then rescale once so that pair sits exactly at `spacing`.
+  // Because every distance scales linearly with c, that single correction is
+  // exact -- no iteration and no guessed constant.
+  //
+  // The previous version clamped radii to the bounds and broke out of the loop
+  // on the first point that fell outside, so a compact cluster quietly lost
+  // most of its cells.
+  const offsets: Point[] = [];
   for (let i = 0; i < count; i++) {
-    // Golden spiral: each point rotates by golden angle, distance grows with i
     const angle = i * goldenAngle;
-    const radius = spacing > 0
-      ? Math.sqrt(i) * (spacing / 2)  // Adjust radius based on spacing
-      : Math.sqrt(i) * 0.5;
+    const radius = Math.sqrt(i);
+    offsets.push({ x: Math.cos(angle) * radius, y: Math.sin(angle) * radius });
+  }
 
-    const clampedRadius = Math.min(radius, maxRadius);
+  let scale = spacing > 0 ? spacing / 2 : 0.5;
 
-    const x = centerX + Math.cos(angle) * clampedRadius;
-    const y = centerY + Math.sin(angle) * clampedRadius;
-
-    // Keep within bounds
-    if (x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY) {
-      positions.push({ x, y });
-    } else {
-      break;  // Out of bounds
+  if (spacing > 0 && count > 1) {
+    let minDistance = Infinity;
+    for (let a = 0; a < offsets.length; a++) {
+      for (let b = a + 1; b < offsets.length; b++) {
+        const dx = offsets[a].x - offsets[b].x;
+        const dy = offsets[a].y - offsets[b].y;
+        minDistance = Math.min(minDistance, Math.sqrt(dx * dx + dy * dy));
+      }
+    }
+    if (minDistance > 0 && Number.isFinite(minDistance)) {
+      scale = spacing / minDistance;
     }
   }
 
-  return positions;
+  return offsets.map((offset) => ({
+    x: centerX + offset.x * scale,
+    y: centerY + offset.y * scale
+  }));
 }
 
 /**
@@ -258,11 +315,11 @@ export function generateCells(
     config.functionWeights
   );
 
-  const bounds = calculateBounds(cellBorderRadius);
   const spacing = getPlacementSpacing(config);
+  const bounds = calculateBounds(cellBorderRadius, config.cellCount, spacing);
 
   // Generate positions based on layout type
-  let positions: Point[] = [];
+  let positions: Point[];
 
   switch (layoutType) {
     case 'grid':

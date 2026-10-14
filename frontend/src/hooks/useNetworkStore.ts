@@ -28,12 +28,25 @@ interface NetworkStore {
   isDragging: boolean;
   presets: Preset[];
 
+  /**
+   * Bumped whenever cells are replaced wholesale (regenerate, template,
+   * count change, import, preset load, reset) but never when a cell is merely
+   * dragged. Views use it to decide when to re-frame the canvas without
+   * yanking the viewport around mid-edit.
+   */
+  layoutVersion: number;
+
   // 3D Mode
   renderMode: '2d' | '3d';
 
-  // Undo/Redo
-  history: HistoryEntry[];
-  historyIndex: number;
+  // Undo/Redo.
+  //
+  // Two stacks rather than an index into a single list: `past` holds the
+  // states preceding each checkpoint, `future` the ones stepped back over.
+  // The previous index-based version advanced redo by two and mutated the
+  // history array during undo, so anything beyond a single step desynchronised.
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   canUndo: boolean;
   canRedo: boolean;
 
@@ -88,6 +101,24 @@ interface NetworkStore {
 
 const MAX_HISTORY = 50;
 
+/** Deep copy of the undoable slice of state. */
+const snapshot = (state: {
+  cells: Cell[];
+  config: NetworkConfig;
+  colors: ColorScheme;
+}): HistoryEntry => ({
+  cells: structuredClone(state.cells),
+  config: structuredClone(state.config),
+  colors: structuredClone(state.colors),
+});
+
+/** Deep copy back out, so a history entry is never aliased by live state. */
+const restore = (entry: HistoryEntry) => ({
+  cells: structuredClone(entry.cells),
+  config: structuredClone(entry.config),
+  colors: structuredClone(entry.colors),
+});
+
 // Helper to save presets to localStorage
 const savePresetsToStorage = (presets: Preset[]) => {
   try {
@@ -115,9 +146,10 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
   selectedCellIds: [],
   isDragging: false,
   presets: loadPresetsFromLocalStorage(),
+  layoutVersion: 0,
   renderMode: '2d',
-  history: [],
-  historyIndex: -1,
+  past: [],
+  future: [],
   canUndo: false,
   canRedo: false,
 
@@ -255,14 +287,16 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
   regenerateLayout: () => {
     get().saveToHistory();
     set((state) => ({
-      cells: generateNetwork(state.config)
+      cells: generateNetwork(state.config),
+      layoutVersion: state.layoutVersion + 1
     }));
   },
 
   applyTemplate: (template) => {
     get().saveToHistory();
     set((state) => ({
-      cells: generateNetworkWithTemplate(state.config, template)
+      cells: generateNetworkWithTemplate(state.config, template),
+      layoutVersion: state.layoutVersion + 1
     }));
   },
 
@@ -289,22 +323,20 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
       if (count === currentCount) return state;
 
-      // ULTRATHINK FIX: Always regenerate with proper spacing
-      // Don't just slice or add - regenerate completely with new count
-      // This ensures consistent spacing across all cells
-      const scaledConfig = {
-        ...state.config,
-        cellCount: count,  // Update to new count
-        livingRadius: state.config.livingRadius * CANVAS_SCALE,
-        functionRadius: state.config.functionRadius * CANVAS_SCALE
-      };
-
-      // Use generateNetwork to create new cells with proper spacing
-      const newCells = generateNetwork(scaledConfig);
+      // Regenerate the whole network so spacing stays consistent across all
+      // cells rather than slicing/appending onto an existing layout.
+      //
+      // Pass the config through unscaled: generateCells() applies CANVAS_SCALE
+      // to livingRadius/functionRadius itself. Pre-scaling here double-scaled
+      // every radius by 100x, which earlier code papered over by firing a
+      // second regenerateLayout() on a setTimeout.
+      const newConfig = { ...state.config, cellCount: count };
+      const newCells = generateNetwork(newConfig);
 
       return {
         cells: newCells,
-        config: { ...state.config, cellCount: count }
+        config: newConfig,
+        layoutVersion: state.layoutVersion + 1
       };
     });
   },
@@ -320,74 +352,58 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
   setRenderMode: (mode) => set({ renderMode: mode }),
 
+  /**
+   * Record a checkpoint of the current state.
+   *
+   * Callers invoke this immediately *before* a change, so the entry captures
+   * what to return to. Checkpoints are explicit rather than automatic on every
+   * `set`, which keeps a drag from pushing one entry per mouse move.
+   */
   saveToHistory: () => set((state) => {
-    const entry: HistoryEntry = {
-      cells: JSON.parse(JSON.stringify(state.cells)),
-      config: JSON.parse(JSON.stringify(state.config)),
-      colors: JSON.parse(JSON.stringify(state.colors))
-    };
+    const entry = snapshot(state);
+    const past = [...state.past, entry];
 
-    // Remove any redo history when making a new change
-    const newHistory = state.history.slice(0, state.historyIndex + 1);
-    newHistory.push(entry);
-
-    // Limit history size
-    if (newHistory.length > MAX_HISTORY) {
-      newHistory.shift();
-    }
+    // Drop the oldest entries once the log is full.
+    if (past.length > MAX_HISTORY) past.splice(0, past.length - MAX_HISTORY);
 
     return {
-      history: newHistory,
-      historyIndex: newHistory.length - 1,
+      past,
+      // A fresh edit invalidates anything that was undone.
+      future: [],
       canUndo: true,
-      canRedo: false
+      canRedo: false,
     };
   }),
 
   undo: () => set((state) => {
-    if (state.historyIndex < 0) return state;
+    if (state.past.length === 0) return state;
 
-    // Save current state for redo if this is the first undo
-    let history = state.history;
-    let newIndex = state.historyIndex;
-
-    if (state.historyIndex === state.history.length - 1) {
-      // Save current state
-      const currentEntry: HistoryEntry = {
-        cells: JSON.parse(JSON.stringify(state.cells)),
-        config: JSON.parse(JSON.stringify(state.config)),
-        colors: JSON.parse(JSON.stringify(state.colors))
-      };
-      history = [...state.history, currentEntry];
-    }
-
-    const entry = history[newIndex];
-    newIndex--;
+    const past = [...state.past];
+    const entry = past.pop()!;
+    const future = [...state.future, snapshot(state)];
 
     return {
-      cells: JSON.parse(JSON.stringify(entry.cells)),
-      config: JSON.parse(JSON.stringify(entry.config)),
-      colors: JSON.parse(JSON.stringify(entry.colors)),
-      history,
-      historyIndex: newIndex,
-      canUndo: newIndex >= 0,
-      canRedo: true
+      ...restore(entry),
+      past,
+      future,
+      canUndo: past.length > 0,
+      canRedo: true,
     };
   }),
 
   redo: () => set((state) => {
-    if (state.historyIndex >= state.history.length - 2) return state;
+    if (state.future.length === 0) return state;
 
-    const newIndex = state.historyIndex + 2;
-    const entry = state.history[newIndex];
+    const future = [...state.future];
+    const entry = future.pop()!;
+    const past = [...state.past, snapshot(state)];
 
     return {
-      cells: JSON.parse(JSON.stringify(entry.cells)),
-      config: JSON.parse(JSON.stringify(entry.config)),
-      colors: JSON.parse(JSON.stringify(entry.colors)),
-      historyIndex: newIndex,
+      ...restore(entry),
+      past,
+      future,
       canUndo: true,
-      canRedo: newIndex < state.history.length - 1
+      canRedo: future.length > 0,
     };
   }),
 
@@ -411,11 +427,12 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
     const preset = state.presets.find(p => p.id === id);
     if (preset) {
       state.saveToHistory();
-      set({
+      set((prev) => ({
         cells: JSON.parse(JSON.stringify(preset.cells)),
         config: JSON.parse(JSON.stringify(preset.config)),
-        colors: JSON.parse(JSON.stringify(preset.colors))
-      });
+        colors: JSON.parse(JSON.stringify(preset.colors)),
+        layoutVersion: prev.layoutVersion + 1
+      }));
     }
   },
 
@@ -432,7 +449,7 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
   loadState: (cells, config, colors) => {
     get().saveToHistory();
-    set({ cells, config, colors });
+    set((state) => ({ cells, config, colors, layoutVersion: state.layoutVersion + 1 }));
   },
 
   importFromJSON: (json) => {
@@ -440,11 +457,12 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
       const data = JSON.parse(json);
       if (data.cells && data.config && data.colors) {
         get().saveToHistory();
-        set({
+        set((state) => ({
           cells: data.cells,
           config: { ...DEFAULT_CONFIG, ...data.config },
-          colors: { ...DEFAULT_COLORS, ...data.colors }
-        });
+          colors: { ...DEFAULT_COLORS, ...data.colors },
+          layoutVersion: state.layoutVersion + 1
+        }));
         return true;
       }
       return false;
@@ -489,10 +507,11 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
       if (newCells.length > 0) {
         get().saveToHistory();
-        set({
+        set((prev) => ({
           cells: newCells,
-          config: { ...state.config, cellCount: newCells.length }
-        });
+          config: { ...prev.config, cellCount: newCells.length },
+          layoutVersion: prev.layoutVersion + 1
+        }));
         return true;
       }
       return false;
@@ -515,10 +534,11 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
       get().saveToHistory();
 
       // Update cells
-      set({
+      set((prev) => ({
         cells: result.cells,
-        config: { ...state.config, cellCount: result.cells.length }
-      });
+        config: { ...prev.config, cellCount: result.cells.length },
+        layoutVersion: prev.layoutVersion + 1
+      }));
 
       return { success: true, errors: result.errors };
     } catch (error) {
@@ -529,12 +549,13 @@ export const useNetworkStore = create<NetworkStore>((set, get) => ({
 
   reset: () => {
     get().saveToHistory();
-    set({
+    set((state) => ({
       cells: generateNetwork(DEFAULT_CONFIG),
       config: DEFAULT_CONFIG,
       colors: DEFAULT_COLORS,
       selectedCellIds: [],
-      isDragging: false
-    });
+      isDragging: false,
+      layoutVersion: state.layoutVersion + 1
+    }));
   }
 }));

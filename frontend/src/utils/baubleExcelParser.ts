@@ -1,46 +1,18 @@
-import * as XLSX from 'xlsx';
+import { readSheetNames, readColumnHeaders, readSheetRows } from './excelIO';
 import { LoadedBaubleFile } from '../types/bauble';
 
 /**
  * Get list of sheet names from an Excel file
  */
 export async function getExcelSheetNames(file: File): Promise<string[]> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    return workbook.SheetNames || [];
-  } catch (error) {
-    return [];
-  }
+  return readSheetNames(file);
 }
 
 /**
  * Get column headers from a specific sheet in an Excel file
  */
 export async function getExcelColumnHeaders(file: File, sheetName?: string): Promise<string[]> {
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-      return [];
-    }
-
-    const targetSheetName = sheetName && workbook.SheetNames.includes(sheetName)
-      ? sheetName
-      : workbook.SheetNames[0];
-
-    const sheet = workbook.Sheets[targetSheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[];
-
-    if (rows.length === 0) {
-      return [];
-    }
-
-    return Object.keys(rows[0]);
-  } catch (error) {
-    return [];
-  }
+  return readColumnHeaders(file, sheetName);
 }
 
 /**
@@ -57,23 +29,14 @@ export async function parseBaubleExcelFile(
   const errors: string[] = [];
 
   try {
-    // Read file
-    const arrayBuffer = await file.arrayBuffer();
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+    const sheetNames = await getExcelSheetNames(file);
+    if (sheetNames.length === 0) {
       errors.push('Excel file has no sheets');
       return null;
     }
 
-    // Use specified sheet or default to first sheet
-    const targetSheetName = sheetName && workbook.SheetNames.includes(sheetName)
-      ? sheetName
-      : workbook.SheetNames[0];
-    const sheet = workbook.Sheets[targetSheetName];
-
-    // Convert to JSON rows
-    const rows = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[];
+    // readSheetRows falls back to the first sheet when the name is unknown.
+    const rows = await readSheetRows(file, sheetName);
 
     if (!rows || rows.length === 0) {
       errors.push('Excel sheet is empty');
@@ -123,8 +86,7 @@ export async function parseBaubleExcelFile(
     // Use override label if provided, otherwise derive from filename (strip extension)
     const motherLabel = motherLabelOverride || file.name.replace(/\.[^.]+$/, '');
 
-    // Generate fileId
-    const fileId = Math.random().toString(36).substring(2, 11);
+    const fileId = crypto.randomUUID();
 
     const result: LoadedBaubleFile = {
       fileId,

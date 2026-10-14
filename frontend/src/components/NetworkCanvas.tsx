@@ -1,9 +1,9 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { useNetworkStore } from '../hooks/useNetworkStore';
 import { useViewState } from '../hooks/useViewState';
-import { calculateSmartLineSegments, calculateBoundingBox, CANVAS_SCALE } from '../utils/geometry';
+import { CANVAS_SCALE } from '../utils/geometry';
 import { generateFunctionBasedLayout } from '../utils/functionBasedLayout';
-import { Point, FunctionType, LineStyle } from '../types';
+import { Point, LineStyle } from '../types';
 
 // Helper to convert LineStyle to canvas dash pattern
 function getLineDash(style: LineStyle, lineWidth: number): number[] {
@@ -36,11 +36,11 @@ export function NetworkCanvas() {
   const { zoom, panX, panY, zoomIn, zoomOut, pan, setView } = useViewState();
 
   // Local UI state
-  const [canvasSize, setCanvasSize] = useState(0);
   const [showConnections, setShowConnections] = useState(true);
   const [showDebug, setShowDebug] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
+  // Guard only -- never rendered, so a ref avoids a setState-in-effect cascade.
+  const isInitializedRef = useRef(false);
 
   // Drag tracking refs
   const dragStartRef = useRef<Point | null>(null);
@@ -94,7 +94,7 @@ export function NetworkCanvas() {
 
   // Initialize cell positions to grid layout on first load
   useEffect(() => {
-    if (cells.length > 0 && !isInitialized) {
+    if (cells.length > 0 && !isInitializedRef.current) {
       const cols = Math.ceil(Math.sqrt(cells.length));
       const spacing = CANVAS_SCALE / (cols + 1);
       let needsInit = false;
@@ -112,10 +112,10 @@ export function NetworkCanvas() {
       });
 
       if (!needsInit) {
-        setIsInitialized(true);
+        isInitializedRef.current = true;
       }
     }
-  }, [cells.length, isInitialized, cells, moveCell]);
+  }, [cells, moveCell]);
 
   // Main draw function
   const draw = useCallback(() => {
@@ -137,8 +137,6 @@ export function NetworkCanvas() {
     // Generate function-based layout
     const layoutNodes = generateFunctionBasedLayout(
       cells,
-      width,
-      height,
       config.functionLabels,
       config.functionWeights,
       config.functionVisible
@@ -282,7 +280,6 @@ export function NetworkCanvas() {
       const rect = container.getBoundingClientRect();
       canvas.width = rect.width * window.devicePixelRatio;
       canvas.height = rect.height * window.devicePixelRatio;
-      setCanvasSize(Math.max(rect.width, rect.height));
 
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.scale(window.devicePixelRatio, window.devicePixelRatio);

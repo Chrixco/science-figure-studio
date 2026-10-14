@@ -67,6 +67,12 @@ export interface ColorScheme {
 
 export type LineStyle = 'solid' | 'dashed' | 'dotted';
 
+/** Where a node's label sits relative to its circle. */
+export type TextPosition = 'inside' | 'above' | 'below' | 'outside';
+
+/** Horizontal alignment of a label within its box. */
+export type TextAlignment = 'left' | 'center' | 'right';
+
 export interface NetworkConfig {
   cellCount: number;
   cellRadius: number;
@@ -82,9 +88,19 @@ export interface NetworkConfig {
   lineOverlapOpacity: number; // Opacity for lines overlapping circles (0-1)
   livingFontSize: number;
   functionFontSize: number;
-  textPosition: 'inside' | 'above' | 'below' | 'outside'; // Where to place text relative to circles
-  textAlignment: 'left' | 'center' | 'right'; // Text alignment
+  textPosition: TextPosition; // Where to place text relative to circles
+  textAlignment: TextAlignment; // Text alignment
   textOffset: number; // Distance from circles (pixels)
+  /**
+   * Nudge labels apart with a force simulation so neighbouring text does not
+   * collide. Labels stay anchored near their preferred position; only the
+   * minimum displacement needed to separate them is applied.
+   */
+  avoidLabelOverlap: boolean;
+  /** Minimum gap between label boxes, in screen pixels. */
+  labelOverlapPadding: number;
+  /** Draw a leader line when a label is pushed clear of its node. */
+  showLabelLeaders: boolean;
   livingOutlineWidth: number;
   livingOutlineStyle: LineStyle;
   functionOutlineWidth: number;
@@ -92,6 +108,7 @@ export interface NetworkConfig {
   cellOutlineWidth: number;
   cellOutlineStyle: LineStyle;
   showExternalConnections: boolean;
+  showFunctionConnections: boolean;
   avoidOverlap: boolean;
   linesOnTop: boolean;
   livingLabel: string;
@@ -185,6 +202,9 @@ export const DEFAULT_CONFIG: NetworkConfig = {
   textPosition: 'inside',
   textAlignment: 'center',
   textOffset: 8,
+  avoidLabelOverlap: false,
+  labelOverlapPadding: 4,
+  showLabelLeaders: true,
   livingOutlineWidth: 3,
   livingOutlineStyle: 'solid',
   functionOutlineWidth: 2,
@@ -192,6 +212,7 @@ export const DEFAULT_CONFIG: NetworkConfig = {
   cellOutlineWidth: 2,
   cellOutlineStyle: 'dashed',
   showExternalConnections: true,
+  showFunctionConnections: true,
   avoidOverlap: true,
   linesOnTop: false,
   livingLabel: 'living',

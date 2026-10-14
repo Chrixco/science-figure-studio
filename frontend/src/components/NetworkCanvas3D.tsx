@@ -304,8 +304,9 @@ export function NetworkCanvas3D({
     if (!scene3DRef.current) return;
 
     const directionalLight = scene3DRef.current.scene.children.find(
-      (child: any) => child.isDirectionalLight
-    ) as any;
+      (child): child is THREE.DirectionalLight => (child as THREE.Light).isLight === true
+        && (child as THREE.DirectionalLight).isDirectionalLight === true
+    );
     if (directionalLight) {
       directionalLight.intensity = lightingIntensity;
     }
@@ -318,8 +319,9 @@ export function NetworkCanvas3D({
     if (!scene3DRef.current) return;
 
     const ambientLight = scene3DRef.current.scene.children.find(
-      (child: any) => child.isAmbientLight
-    ) as any;
+      (child): child is THREE.AmbientLight => (child as THREE.Light).isLight === true
+        && (child as THREE.AmbientLight).isAmbientLight === true
+    );
     if (ambientLight) {
       ambientLight.intensity = ambientIntensity;
     }
@@ -353,17 +355,21 @@ export function NetworkCanvas3D({
     render3D(scene3DRef.current);
   }, [colors]);
 
-  // Update buffer when avoidOverlap or cellSpacing changes in 2D
-  useEffect(() => {
-    // Auto-sync buffer percentage with cellSpacing from 2D config
-    // This ensures consistent behavior when switching between 2D/3D
-    if (config.avoidOverlap && config.cellSpacing && Math.abs(config.cellSpacing - bufferPercent) > 0.01) {
-      setBufferPercent(config.cellSpacing);
-    } else if (!config.avoidOverlap && bufferPercent !== 0) {
-      // If avoidOverlap was disabled, reset buffer to 0
-      setBufferPercent(0);
-    }
-  }, [config.avoidOverlap, config.cellSpacing]);
+  // Keep the 3D buffer slider in step with the 2D overlap config, while still
+  // letting the user override it locally. Adjusting during render (rather than
+  // in an effect) is React's documented pattern for "derive from props but keep
+  // it editable" and avoids a second render pass.
+  const [prevOverlapConfig, setPrevOverlapConfig] = useState({
+    avoidOverlap: config.avoidOverlap,
+    cellSpacing: config.cellSpacing,
+  });
+  if (
+    prevOverlapConfig.avoidOverlap !== config.avoidOverlap ||
+    prevOverlapConfig.cellSpacing !== config.cellSpacing
+  ) {
+    setPrevOverlapConfig({ avoidOverlap: config.avoidOverlap, cellSpacing: config.cellSpacing });
+    setBufferPercent(config.avoidOverlap ? config.cellSpacing : 0);
+  }
 
   return (
     <div

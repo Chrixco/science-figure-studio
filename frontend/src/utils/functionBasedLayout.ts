@@ -12,118 +12,48 @@ interface LayoutNode {
 }
 
 /**
- * Creates a multi-cell layout where:
- * - Multiple complete cells (living circle + functions) are positioned across canvas
- * - Each cell has its own living circle with functions around it
- * - Cells are spaced to avoid overlapping
+ * Project the store's cells into flat render nodes.
+ *
+ * Geometry is *read*, not recomputed. This function used to hardcode its own
+ * livingRadius (0.3), function ring radius (2.5) and cell bounding radius
+ * (3.2), discarding everything cellGeneration/geometry had computed. The two
+ * disagreed badly: the store spaced cells 4.725 apart for a bounding radius of
+ * 2.25, while the renderer drew bounding circles of 3.2 that needed 6.4 --- so
+ * cells visibly overlapped even with "Avoid Overlap" enabled, and the cell
+ * radius / function weight controls had no effect on what was drawn.
  */
 export function generateFunctionBasedLayout(
   cells: Cell[],
-  canvasWidth: number,
-  canvasHeight: number,
   functionLabels: Record<FunctionType, string>,
   functionWeights: Record<FunctionType, number>,
   visible: Record<FunctionType, boolean>
 ): LayoutNode[] {
   const nodes: LayoutNode[] = [];
-  const CANVAS_SCALE = 10;
 
-  // Get unique visible function types
-  const functionTypesInCells = new Set<FunctionType>();
-  cells.forEach((cell) => {
-    cell.functions.forEach((fn) => {
-      if (visible[fn.type]) {
-        functionTypesInCells.add(fn.type);
-      }
-    });
-  });
-
-  const visibleFunctions = Array.from(functionTypesInCells).sort();
-  const functionCount = visibleFunctions.length;
-
-  // Cell layout parameters
-  const functionRadius = 2.5; // Distance from cell center to function nodes
-  const livingRadius = 0.3; // Central living circle radius
-  const functionNodeRadius = 0.5; // Function node radius
-  const boundingRadius = functionRadius + functionNodeRadius + 0.2; // Total bounding circle radius
-  const cellSpacing = boundingRadius * 2 + 0.8; // Space between cell centers (with buffer)
-
-  // Position cells in a grid layout with overlap detection
-  const cellCount = cells.length;
-  const cols = Math.ceil(Math.sqrt(cellCount));
-  const rows = Math.ceil(cellCount / cols);
-
-  // Calculate grid positioning to fit within canvas
-  const gridWidth = cols * cellSpacing;
-  const gridHeight = rows * cellSpacing;
-
-  // Dynamically adjust spacing if cells don't fit
-  let adjustedCellSpacing = cellSpacing;
-  if (gridWidth > CANVAS_SCALE || gridHeight > CANVAS_SCALE) {
-    // Shrink spacing to fit all cells
-    adjustedCellSpacing = Math.min(
-      (CANVAS_SCALE - 1) / cols,
-      (CANVAS_SCALE - 1) / rows
-    );
-  }
-
-  const adjustedGridWidth = cols * adjustedCellSpacing;
-  const adjustedGridHeight = rows * adjustedCellSpacing;
-  const startX = (CANVAS_SCALE - adjustedGridWidth) / 2 + adjustedCellSpacing / 2;
-  const startY = (CANVAS_SCALE - adjustedGridHeight) / 2 + adjustedCellSpacing / 2;
-
-  console.log(`Layout: ${cellCount} cells (${cols}x${rows}), spacing=${adjustedCellSpacing.toFixed(2)}, startX=${startX.toFixed(2)}, startY=${startY.toFixed(2)}`);
-
-  // Store cell positions for overlap detection
-  const cellPositions: Array<{ id: string; x: number; y: number; radius: number }> = [];
-
-  // Create nodes for each cell
   cells.forEach((cell, cellIndex) => {
-    // Use cell position from store, or calculate grid position if not set
-    let cellCenterX = cell.position.x;
-    let cellCenterY = cell.position.y;
-
-    // If cell position is at origin (not initialized), use grid layout for initial positioning
-    if (cellCenterX === 0 && cellCenterY === 0) {
-      const gridRow = Math.floor(cellIndex / cols);
-      const gridCol = cellIndex % cols;
-      cellCenterX = startX + gridCol * adjustedCellSpacing;
-      cellCenterY = startY + gridRow * adjustedCellSpacing;
-    }
-
-    cellPositions.push({
-      id: cell.id,
-      x: cellCenterX,
-      y: cellCenterY,
-      radius: boundingRadius, // Use the calculated bounding radius
-    });
-
-    // Add living circle (core of the cell)
     nodes.push({
       id: `living-${cell.id}`,
       type: 'cell',
       label: cell.label || `Cell ${cellIndex + 1}`,
-      position: { x: cellCenterX, y: cellCenterY },
+      position: cell.position,
       cellId: cell.id,
-      radius: livingRadius,
-      boundingRadius,
+      radius: cell.livingRadius,
+      boundingRadius: cell.radius,
     });
 
-    // Add function nodes around this cell
-    visibleFunctions.forEach((fnType, fnIndex) => {
-      const angle = (fnIndex / functionCount) * Math.PI * 2;
-      const fnX = cellCenterX + functionRadius * Math.cos(angle);
-      const fnY = cellCenterY + functionRadius * Math.sin(angle);
+    for (const fn of cell.functions) {
+      if (!visible[fn.type]) continue;
 
       nodes.push({
-        id: `function-${cell.id}-${fnType}`,
+        id: `function-${cell.id}-${fn.type}`,
         type: 'function',
-        label: functionLabels[fnType] || fnType,
-        position: { x: fnX, y: fnY },
-        functionType: fnType,
-        radius: 0.5 * (functionWeights[fnType] || 1),
+        label: functionLabels[fn.type] || fn.type,
+        position: fn.position,
+        functionType: fn.type,
+        cellId: cell.id,
+        radius: fn.radius * (functionWeights[fn.type] ?? 1),
       });
-    });
+    }
   });
 
   return nodes;
@@ -135,7 +65,6 @@ export function generateFunctionBasedLayout(
  */
 export function generateFunctionConnections(
   cells: Cell[],
-  functionLabels: Record<FunctionType, string>,
   visible: Record<FunctionType, boolean>
 ) {
   interface Connection {

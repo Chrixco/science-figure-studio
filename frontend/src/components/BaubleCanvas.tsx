@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useBaubleStore } from '../hooks/useBaubleStore';
 import { useCameraStore } from '../hooks/useCameraStore';
 import { BaubleNode } from '../types/bauble';
+import { disposeGroupChildren, disposeObject3D } from '../utils/threeDispose';
 
 const CANVAS_SCALE = 10;
 const CANVAS_CENTER = CANVAS_SCALE / 2;
@@ -63,6 +64,10 @@ export function BaubleCanvas() {
     zoomByFactor,
   } = useCameraStore();
 
+  // Tracked via ResizeObserver so the camera and the SVG selection overlay both
+  // stay correct when the container resizes (e.g. the sidebar is toggled) --
+  // a window 'resize' listener alone misses those.
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [interactionMode, setInteractionMode] = useState<'pan' | 'select'>('pan'); // Default to pan mode
   const [selectionPolygon, setSelectionPolygon] = useState<Array<{ x: number; y: number }>>([]);
   const [selectedNodesInPolygon, setSelectedNodesInPolygon] = useState<Set<string>>(new Set());
@@ -88,7 +93,7 @@ export function BaubleCanvas() {
 
     // Measure text lines
     const words = text.split(' ');
-    let lines: string[] = [];
+    const lines: string[] = [];
     let currentLine = '';
     const padding = scaledFontSize * 0.5; // Padding around text
 
@@ -152,6 +157,33 @@ export function BaubleCanvas() {
     };
   };
 
+  // Track container size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      setContainerSize({ width: el.clientWidth, height: el.clientHeight });
+    });
+    observer.observe(el);
+    setContainerSize({ width: el.clientWidth, height: el.clientHeight });
+    return () => observer.disconnect();
+  }, []);
+
+  // Keep camera + renderer in sync with the container
+  useEffect(() => {
+    const { width, height } = containerSize;
+    const camera = cameraRef.current;
+    const renderer = rendererRef.current;
+    if (!camera || !renderer || width === 0 || height === 0) return;
+
+    camera.left = -width / 2;
+    camera.right = width / 2;
+    camera.top = height / 2;
+    camera.bottom = -height / 2;
+    camera.updateProjectionMatrix();
+    renderer.setSize(width, height);
+  }, [containerSize]);
+
   // Initialize Three.js scene
   useEffect(() => {
     if (!containerRef.current) return;
@@ -201,26 +233,24 @@ export function BaubleCanvas() {
     edgesRef.current = edgesGroup;
     nodesGroupRef.current = nodesGroup;
 
-    // Handle resize
-    const handleResize = () => {
-      const w = containerRef.current?.clientWidth || width;
-      const h = containerRef.current?.clientHeight || height;
-      camera.left = -w / 2;
-      camera.right = w / 2;
-      camera.top = h / 2;
-      camera.bottom = -h / 2;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    window.addEventListener('resize', handleResize);
+    // Resize is handled by the containerSize effect above.
 
     // Cleanup
+    const container = containerRef.current;
     return () => {
-      window.removeEventListener('resize', handleResize);
-      if (containerRef.current?.contains(renderer.domElement)) {
-        containerRef.current.removeChild(renderer.domElement);
+      if (container?.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
       }
+      disposeObject3D(scene);
+      scene.clear();
+      renderer.dispose();
+      // Frees the WebGL context itself; browsers cap how many may be live at
+      // once, so leaking them eventually kills rendering for the whole page.
+      renderer.forceContextLoss();
+      sceneRef.current = null;
+      cameraRef.current = null;
+      rendererRef.current = null;
+      nodeMeshesRef.current.clear();
     };
   }, [config.backgroundColor]);
 
@@ -233,9 +263,11 @@ export function BaubleCanvas() {
     const edgesGroup = edgesRef.current;
     const themeColor = getContrastColors(config.backgroundColor);
 
-    // Clear previous
-    nodesGroup.clear();
-    edgesGroup.clear();
+    // Clear previous. Dispose first -- clear() alone detaches the meshes but
+    // leaves their geometries, materials and label textures on the GPU, and
+    // this effect re-runs on every graph/config change.
+    disposeGroupChildren(nodesGroup);
+    disposeGroupChildren(edgesGroup);
     nodeMeshesRef.current.clear();
 
     // Helper function to get node radius based on kind and multipliers
@@ -277,7 +309,7 @@ export function BaubleCanvas() {
       ];
 
       const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      let lineWidth = config.edgeWidth;
+      const lineWidth = config.edgeWidth;
       let opacity = 0.6;
 
       if (edge.kind === 'mother-to-mother') {
@@ -766,8 +798,7 @@ export function BaubleCanvas() {
             >
               <polygon
                 points={selectionPolygon.map(p => {
-                  const width = containerRef.current?.clientWidth || 0;
-                  const height = containerRef.current?.clientHeight || 0;
+                  const { width, height } = containerSize;
 
                   // Convert from canvas space (0-10) to world space
                   const worldX = (p.x - CANVAS_CENTER) * WORLD_SCALE;

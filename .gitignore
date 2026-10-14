@@ -42,3 +42,12 @@ npm-debug.log*
 
 # Claude
 .claude/
+
+# Syncthing / file-sync conflict copies
+*SFConflict*
+*.sync-conflict-*
+
+# Local backups and quarantined files
+*.backup
+*.bak
+.attic/

@@ -76,7 +76,7 @@ export function getCollisionStats(
   });
 
   const overlapRatio = overlappingCellIds.size / cells.length;
-  let severity: 'none' | 'low' | 'medium' | 'high' = 'none';
+  let severity: 'none' | 'low' | 'medium' | 'high';
 
   if (overlapRatio === 0) {
     severity = 'none';
